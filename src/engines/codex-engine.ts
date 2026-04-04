@@ -20,6 +20,12 @@ import {
   toStringValue,
 } from "./shared.js";
 
+type CodexAuthMethod = "subscription" | "apiKey" | "none";
+
+interface CodexEngineStatusSnapshot extends EngineStatusSnapshot {
+  authMethod: CodexAuthMethod;
+}
+
 type CodexRunResult = {
   text: string;
   sessionId: string | null;
@@ -44,6 +50,7 @@ export class CodexEngine implements IEngine {
   };
   private activeProcess: any = null;
   private sentAtLeastOnePrompt = false;
+  private authMethod: CodexAuthMethod = "none";
 
   constructor(config: EngineConfig) {
     this.config = {
@@ -68,6 +75,15 @@ export class CodexEngine implements IEngine {
       throw new Error(this.usage.lastError);
     }
 
+    this.authMethod = await this.detectAuth();
+    if (this.authMethod === "none") {
+      this.state = "error";
+      this.usage.lastError =
+        "Codex authentication is unavailable. Configure `apiKey` or sign in with `codex auth login`.";
+      throw new Error(this.usage.lastError);
+    }
+
+    this.usage.lastError = undefined;
     this.sessionId = this.config.resumeSessionId ?? this.sessionId;
     this.state = "running";
   }
@@ -139,11 +155,12 @@ export class CodexEngine implements IEngine {
     this.state = "stopped";
   }
 
-  status(): EngineStatusSnapshot {
+  status(): CodexEngineStatusSnapshot {
     return {
       state: this.state,
       sessionId: this.sessionId,
       model: this.config.model,
+      authMethod: this.authMethod,
       usage: {
         costUsd: this.usage.costUsd,
         tokenCount: { ...this.usage.tokenCount },
@@ -278,6 +295,7 @@ export class CodexEngine implements IEngine {
   }
 
   private buildArgs(message: string): string[] {
+    const apiKey = this.resolveApiKey();
     const baseArgs = [
       "exec",
       "--json",
@@ -285,6 +303,7 @@ export class CodexEngine implements IEngine {
       "workspace-write",
       "--model",
       this.config.model,
+      ...(this.authMethod === "apiKey" && apiKey ? ["--api-key", apiKey] : []),
       ...(this.config.args ?? []),
     ];
 
@@ -293,6 +312,69 @@ export class CodexEngine implements IEngine {
     }
 
     return [...baseArgs, message];
+  }
+
+  private async detectAuth(): Promise<CodexAuthMethod> {
+    const command = this.config.command ?? "codex";
+    const apiKey = this.resolveApiKey();
+    const env = {
+      ...(process?.env ?? {}),
+      ...(this.config.env ?? {}),
+    };
+
+    return await new Promise<CodexAuthMethod>((resolve, reject) => {
+      let stdoutBuffer = "";
+      let stderrBuffer = "";
+      let settled = false;
+
+      const settle = (
+        handler: (resolveValue: (value: CodexAuthMethod) => void, rejectValue: (error: Error) => void) => void,
+      ): void => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        handler(resolve, reject);
+      };
+
+      const child = spawn(command, ["auth", "status"], {
+        cwd: this.config.cwd,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      child.stdout.on("data", (chunk: unknown) => {
+        stdoutBuffer += this.chunkToString(chunk);
+      });
+
+      child.stderr.on("data", (chunk: unknown) => {
+        stderrBuffer += this.chunkToString(chunk);
+      });
+
+      child.once("error", (error: unknown) => {
+        if (this.isJsonRecord(error) && error.code === "ENOENT") {
+          settle((_, rejectValue) => rejectValue(this.createSpawnError(error)));
+          return;
+        }
+
+        settle((resolveValue) => resolveValue(apiKey ? "apiKey" : "none"));
+      });
+
+      child.once("close", (code: number | null) => {
+        const rawOutput = [stdoutBuffer, stderrBuffer]
+          .filter((part) => part.trim().length > 0)
+          .join("\n")
+          .trim();
+
+        if (this.hasSubscriptionAuth(rawOutput, code)) {
+          settle((resolveValue) => resolveValue("subscription"));
+          return;
+        }
+
+        settle((resolveValue) => resolveValue(apiKey ? "apiKey" : "none"));
+      });
+    });
   }
 
   private resolvePricing(): ModelPricing {
@@ -462,7 +544,7 @@ export class CodexEngine implements IEngine {
 
     if (/auth|login|api key|credential|unauthorized|forbidden/i.test(trimmed)) {
       return new Error(
-        "Codex authentication appears to be unavailable or expired. Configure `CODEX_API_KEY` or refresh the CLI login.",
+        "Codex authentication appears to be unavailable or expired. Configure `apiKey`/`CODEX_API_KEY` or refresh the CLI login.",
       );
     }
 
@@ -486,6 +568,44 @@ export class CodexEngine implements IEngine {
 
   private getJsonRecord(value: unknown): JsonRecord | undefined {
     return this.isJsonRecord(value) ? value : undefined;
+  }
+
+  private hasSubscriptionAuth(output: string, code: number | null): boolean {
+    if (code !== 0) {
+      return false;
+    }
+
+    const normalized = output.toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    if (
+      /not logged in|not authenticated|unauthenticated|signed out|login required|no active subscription|expired/i.test(
+        normalized,
+      )
+    ) {
+      return false;
+    }
+
+    if (/api key/i.test(normalized) && !/chatgpt|subscription|plan|plus|pro|team|enterprise/i.test(normalized)) {
+      return false;
+    }
+
+    return /logged in|authenticated|signed in|chatgpt|subscription|plan|plus|pro|team|enterprise/i.test(
+      normalized,
+    );
+  }
+
+  private resolveApiKey(): string | undefined {
+    return (
+      this.config.apiKey ??
+      this.config.env?.CODEX_API_KEY ??
+      this.config.env?.OPENAI_API_KEY ??
+      (typeof process !== "undefined"
+        ? process.env?.CODEX_API_KEY ?? process.env?.OPENAI_API_KEY
+        : undefined)
+    );
   }
 
   private chunkToString(chunk: unknown): string {
