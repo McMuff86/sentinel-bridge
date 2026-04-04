@@ -1,12 +1,28 @@
 {
   "name": "sentinel-bridge",
   "version": "0.1.0",
+  "description": "OpenClaw plugin: Claude Code CLI, Codex CLI, Grok API via unified sb_* tools",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
     "test": "vitest run --passWithNoTests",
     "lint": "tsc --noEmit -p tsconfig.json"
   },

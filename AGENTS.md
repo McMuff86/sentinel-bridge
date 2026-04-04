@@ -33,7 +33,10 @@ sentinel-bridge/
 ├── docs/
 │   ├── TECHNICAL-ARCHITECTURE.md
 │   ├── API-REFERENCE.md
+│   ├── configuration.md
+│   ├── LIVE-VERIFICATION.md # checklist before OpenClaw + real CLI smoke tests
 │   └── CONTEXT-HANDOFF.md   # onboarding + parallel-branch notes for agents
+├── openclaw.plugin.json     # Plugin manifest (main → dist/index.js)
 ├── src/
 │   ├── index.ts              # Plugin entry point (register tools + services)
 │   ├── types.ts              # Shared types, interfaces, pricing

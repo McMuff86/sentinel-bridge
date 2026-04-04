@@ -204,10 +204,9 @@ Auto-generated names follow the pattern: `{engine}-{adjective}-{noun}` (e.g., `c
 
 ### TTL & Cleanup
 
-- Configurable `sessionTtlMinutes` (default: 120)
-- Periodic sweep every 60s kills idle sessions
-- Persisted session metadata saved to `~/.openclaw/sentinel-sessions.json` for resume capability
-- Disk persistence TTL: 7 days
+- Configurable via plugin `sessionTTLMs` and `cleanupIntervalMs` (**milliseconds**); see `src/plugin.ts` / `SessionManager` defaults
+- Periodic sweep removes idle sessions past TTL
+- Session resume uses engine-level `resumeSessionId` where supported (see Claude engine)
 
 ### Concurrency
 
@@ -217,51 +216,9 @@ Auto-generated names follow the pattern: `{engine}-{adjective}-{noun}` (e.g., `c
 
 ## OpenClaw Plugin Integration
 
-sentinel-bridge registers as a standard OpenClaw plugin:
+sentinel-bridge registers as an OpenClaw plugin. The **authoritative manifest** is the repo root **`openclaw.plugin.json`** (entry `main`: `./dist/index.js`, export `activate` from `src/index.ts`). Tool names and config schema there should match `buildTools()` and `src/plugin.ts`.
 
-### Plugin Manifest (`openclaw.plugin.json`)
-
-```json
-{
-  "id": "sentinel-bridge",
-  "name": "Sentinel Bridge",
-  "description": "Multi-engine coding agent — Claude Code, Codex, Grok",
-  "enabledByDefault": false,
-  "configSchema": {
-    "type": "object",
-    "properties": {
-      "claudeBin": { "type": "string", "default": "claude" },
-      "codexBin": { "type": "string", "default": "codex" },
-      "defaultEngine": { "type": "string", "enum": ["claude", "codex", "grok"], "default": "claude" },
-      "defaultModel": { "type": "string" },
-      "maxConcurrentSessions": { "type": "number", "default": 5 },
-      "sessionTtlMinutes": { "type": "number", "default": 120 },
-      "grokApiKey": { "type": "string", "description": "xAI API key (or use XAI_API_KEY env)" },
-      "fallbackEngine": { "type": "string", "enum": ["claude", "codex", "grok"] },
-      "pricingOverrides": { "type": "object" }
-    }
-  },
-  "capabilities": {
-    "childProcess": true,
-    "networkAccess": ["api.x.ai"]
-  },
-  "contracts": {
-    "tools": [
-      "sb_session_start",
-      "sb_session_send",
-      "sb_session_stop",
-      "sb_session_list",
-      "sb_session_status",
-      "sb_session_compact",
-      "sb_engine_list",
-      "sb_model_list",
-      "sb_session_switch_model",
-      "sb_session_switch_engine",
-      "sb_cost_report"
-    ]
-  }
-}
-```
+**Live install note:** OpenClaw’s expected manifest fields may differ by version — validate against your OpenClaw release when something fails to load.
 
 ### Registration Flow
 
@@ -275,7 +232,7 @@ OpenClaw loads plugin
 
 ### Lazy Initialization
 
-Neither SessionManager nor engine processes are created at plugin load time. They are initialized on the first tool invocation. This keeps memory at zero for users who have the plugin installed but aren't using it.
+`SessionManager` is created in `activate()` when the plugin loads; engine subprocesses start on `sb_session_start` / `start()`. Adjust this section if you change `activate()` to defer manager creation.
 
 ## Auth Flow
 
