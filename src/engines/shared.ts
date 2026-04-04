@@ -80,6 +80,18 @@ export function roundUsd(value: number): number {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
+export function splitCachedInputTokens(
+  totalInputTokens: number,
+  cachedInputTokens: number,
+): { input: number; cachedInput: number } {
+  const cachedInput = Math.max(0, cachedInputTokens);
+
+  return {
+    input: Math.max(0, totalInputTokens - cachedInput),
+    cachedInput,
+  };
+}
+
 export function toNumber(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;

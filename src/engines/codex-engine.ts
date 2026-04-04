@@ -14,6 +14,7 @@ import {
   mergeEngineConfig,
   mergeTokenUsage,
   roundUsd,
+  splitCachedInputTokens,
   toNumber,
   toStringValue,
 } from "./shared.js";
@@ -383,10 +384,12 @@ export class CodexEngine implements IEngine {
       return undefined;
     }
 
+    const splitUsage = splitCachedInputTokens(inputTokens, cachedInputTokens);
+
     return {
-      input: inputTokens,
+      input: splitUsage.input,
       output: outputTokens,
-      cachedInput: cachedInputTokens,
+      cachedInput: splitUsage.cachedInput,
     };
   }
 
