@@ -153,7 +153,8 @@ export class GrokEngine implements IEngine {
       return responseText;
     } catch (error) {
       const normalizedError = this.normalizeError(error, timeoutMs);
-      if (this.state !== "stopping" && this.state !== "stopped") {
+      const s: string = this.state;
+      if (s !== "stopping" && s !== "stopped") {
         this.state = "error";
       }
       this.usage.lastError = normalizedError.message;
@@ -197,7 +198,7 @@ export class GrokEngine implements IEngine {
     return (
       this.config.apiKey ??
       this.config.env?.XAI_API_KEY ??
-      process.env?.XAI_API_KEY
+      (typeof process !== 'undefined' ? process.env?.XAI_API_KEY : undefined)
     );
   }
 

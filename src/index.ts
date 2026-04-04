@@ -12,7 +12,7 @@ import type { SentinelBridgeConfig } from './plugin.js';
 
 export { PLUGIN_META, DEFAULT_CONFIG } from './plugin.js';
 export type { SentinelBridgeConfig, EngineConfig } from './plugin.js';
-export type { IEngine, ISession, EngineStats, ModelPricing } from './types.js';
+export type { IEngine, ISession, EngineState, ModelPricing } from './types.js';
 
 /* ── Tool definitions ─────────────────────────────────────────── */
 

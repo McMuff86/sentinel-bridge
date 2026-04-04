@@ -175,7 +175,7 @@ export class ClaudeEngine implements IEngine {
     const args = this.buildArgs(message);
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const env = {
-      ...(process.env ?? {}),
+      ...(process?.env ?? {}),
       ...(this.config.env ?? {}),
     };
 
