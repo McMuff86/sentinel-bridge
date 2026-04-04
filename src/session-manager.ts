@@ -43,7 +43,7 @@ const DEFAULT_FALLBACK_CHAIN: EngineKind[] = ['claude', 'codex', 'grok'];
 
 const MODEL_ALIASES: Record<EngineKind, Record<string, string>> = {
   claude: {
-    opus: 'claude-opus-4-20250514',
+    opus: 'claude-opus-4-6',
     'opus-4.6': 'claude-opus-4-6',
     'claude-opus-4': 'claude-opus-4-6',
     sonnet: 'claude-sonnet-4',

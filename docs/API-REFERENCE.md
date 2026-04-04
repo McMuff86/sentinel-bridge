@@ -118,7 +118,7 @@ Defined in `src/session-manager.ts` (`MODEL_ALIASES`). Examples:
 
 | Alias / pattern | Resolves toward | Engine |
 |-----------------|-----------------|--------|
-| `opus` | `claude-opus-4-20250514` | claude |
+| `opus` | `claude-opus-4-6` | claude |
 | `sonnet` | `claude-sonnet-4` | claude |
 | `haiku` | `claude-haiku-4` | claude |
 | `codex` | `gpt-5.4` | codex |
