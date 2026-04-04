@@ -1,6 +1,6 @@
 # Context handoff — sentinel-bridge
 
-This file is for **future agents and contributors** so they can continue work without re-reading the entire tree. See also [AGENTS.md](../AGENTS.md) (style and rules), [TECHNICAL-ARCHITECTURE.md](./TECHNICAL-ARCHITECTURE.md), and [API-REFERENCE.md](./API-REFERENCE.md).
+This file is for **future agents and contributors** so they can continue work without re-reading the entire tree. See also [AGENTS.md](../AGENTS.md) (style and rules), [TECHNICAL-ARCHITECTURE.md](./TECHNICAL-ARCHITECTURE.md), [API-REFERENCE.md](./API-REFERENCE.md), and **[LIVE-VERIFICATION.md](./LIVE-VERIFICATION.md)** (pre-flight checklist before real OpenClaw + CLI tests).
 
 ## What this project is
 

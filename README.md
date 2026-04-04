@@ -28,21 +28,25 @@ All engines look the same to OpenClaw. Start sessions, send messages, switch mod
 
 ```bash
 npm install sentinel-bridge
-openclaw plugins install sentinel-bridge
+npm run build   # from a git checkout; npm package should ship dist/
+openclaw plugins install sentinel-bridge   # exact command depends on your OpenClaw version
 ```
 
 ```jsonc
-// openclaw config
+// openclaw config — engine blocks must be under "engines"
 {
   "plugins": {
     "sentinel-bridge": {
-      "defaultEngine": "claude"
+      "defaultEngine": "claude",
+      "engines": {
+        "claude": { "command": "claude", "defaultModel": "claude-opus-4-6" }
+      }
     }
   }
 }
 ```
 
-That's it. Your Claude requests now route through the CLI. 🎯
+Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host. For a repeatable live smoke test, use [docs/LIVE-VERIFICATION.md](docs/LIVE-VERIFICATION.md).
 
 ## Architecture
 
@@ -72,15 +76,13 @@ That's it. Your Claude requests now route through the CLI. 🎯
 
 ## Features
 
-- **Subscription passthrough** — Claude usage via CLI costs $0 beyond your existing plan
+- **Subscription passthrough** — Claude usage via CLI costs $0 beyond your existing plan (when the CLI is authenticated)
 - **Multi-engine sessions** — Claude, Codex, and Grok through one interface
-- **Session persistence** — Claude sessions resume across restarts; Codex persists via working directory
-- **Live model switching** — change models mid-session without losing context
-- **Engine switching** — swap engines on the fly, same working directory
-- **Cost tracking** — per-session, per-engine breakdowns with subscription savings highlighted
-- **Fallback chains** — automatic failover to a backup engine on errors
-- **Lazy initialization** — zero memory footprint until first use
-- **11 tools** in the `sb_*` namespace — full session lifecycle management
+- **Session persistence** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
+- **Cost tracking** — per-session, per-engine breakdowns (informational)
+- **Start fallback chain** — if the primary engine’s `start()` fails, retry other engines (`defaultFallbackChain`); see [configuration.md](docs/configuration.md)
+- **Model aliases** — e.g. `opus`, `sonnet`, `codex` → resolved model ids
+- **11 tools** in the `sb_*` namespace — session lifecycle, engines, routing, cost, compact
 
 ## Engines
 
@@ -106,35 +108,37 @@ _*Tracked for visibility but covered by subscription — actual cost is $0._
 
 ## Configuration
 
+Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`engines.{claude,codex,grok}`**, and optional **`defaultFallbackChain`**. Example:
+
 ```jsonc
 {
   "plugins": {
     "sentinel-bridge": {
-      "defaultEngine": "claude",        // "claude" | "codex" | "grok"
-      "defaultModel": "claude-sonnet-4",
+      "defaultEngine": "claude",
+      "defaultModel": "claude/sonnet",
+      "defaultFallbackChain": ["claude", "codex", "grok"],
       "maxConcurrentSessions": 5,
-      "sessionTtlMinutes": 120,
-      "fallbackEngine": "codex",        // optional: auto-failover
-
-      // Engine-specific overrides
-      "claude": {
-        "command": "claude",            // path to claude CLI
-        "model": "claude-sonnet-4"
-      },
-      "codex": {
-        "command": "codex",
-        "model": "o4-mini"
-      },
-      "grok": {
-        "apiKey": "xai-...",            // or use XAI_API_KEY env
-        "model": "grok-3"
+      "sessionTTLMs": 604800000,
+      "engines": {
+        "claude": {
+          "command": "claude",
+          "defaultModel": "claude-sonnet-4"
+        },
+        "codex": {
+          "command": "codex",
+          "defaultModel": "gpt-5.4"
+        },
+        "grok": {
+          "enabled": false,
+          "defaultModel": "grok-4-1-fast"
+        }
       }
     }
   }
 }
 ```
 
-For the full configuration reference, see [docs/configuration.md](docs/configuration.md).
+Full reference: [docs/configuration.md](docs/configuration.md).
 
 ## Migration Guide
 
@@ -164,7 +168,10 @@ openclaw plugins install sentinel-bridge
   "plugins": {
     "sentinel-bridge": {
       "defaultEngine": "claude",
-      "defaultModel": "claude-opus-4"
+      "defaultModel": "claude/opus",
+      "engines": {
+        "claude": { "defaultModel": "claude-opus-4-6" }
+      }
     }
   }
 }
@@ -174,30 +181,29 @@ Your requests now go through the CLI. Same models, same quality, zero additional
 
 ## Tools
 
-sentinel-bridge registers 11 tools under the `sb_*` namespace:
+Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for parameters):
 
 | Tool | Description |
 |------|-------------|
-| `sb_session_start` | Start a new session with any engine |
+| `sb_session_start` | Start a session (with optional start-time fallback chain) |
 | `sb_session_send` | Send a message to an active session |
-| `sb_session_stop` | Stop a session and clean up |
-| `sb_session_list` | List all active sessions |
-| `sb_session_status` | Detailed session status with cost/tokens |
-| `sb_session_compact` | Compact context window |
-| `sb_engine_list` | List available engines and auth status |
-| `sb_model_list` | List models with pricing |
-| `sb_session_switch_model` | Switch model mid-session |
-| `sb_session_switch_engine` | Switch engine mid-session |
-| `sb_cost_report` | Aggregated cost report |
-
-For full parameter documentation, see [docs/API-REFERENCE.md](docs/API-REFERENCE.md).
+| `sb_session_stop` | Stop a session |
+| `sb_session_list` | List sessions |
+| `sb_session_status` | Session details |
+| `sb_session_overview` | Aggregate overview + engine descriptors |
+| `sb_engine_list` / `sb_engine_status` | Engine health / PATH / API key |
+| `sb_model_route` | Resolve model → engine |
+| `sb_cost_report` | Cost aggregation |
+| `sb_compact` | Compact session context (engine-specific) |
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md)
 - [Configuration Reference](docs/configuration.md)
 - [API Reference](docs/API-REFERENCE.md)
+- [Live verification checklist](docs/LIVE-VERIFICATION.md)
 - [Technical Architecture](docs/TECHNICAL-ARCHITECTURE.md)
+- [Context handoff (agents)](docs/CONTEXT-HANDOFF.md)
 
 ## Contributing
 

@@ -1,0 +1,98 @@
+{
+  "id": "sentinel-bridge",
+  "name": "Sentinel Bridge",
+  "version": "0.1.0",
+  "description": "Multi-engine bridge: Claude Code CLI, Codex CLI, Grok API for OpenClaw.",
+  "main": "./dist/index.js",
+  "type": "module",
+  "enabledByDefault": false,
+  "configSchema": {
+    "type": "object",
+    "description": "Matches src/plugin.ts SentinelBridgeConfig — engine options under engines.claude | engines.codex | engines.grok",
+    "properties": {
+      "defaultEngine": {
+        "type": "string",
+        "enum": ["claude", "codex", "grok"],
+        "default": "claude"
+      },
+      "defaultModel": {
+        "type": "string",
+        "description": "Model ref, e.g. claude/opus"
+      },
+      "defaultFallbackChain": {
+        "type": "array",
+        "items": { "type": "string", "enum": ["claude", "codex", "grok"] },
+        "description": "After primary, try these engines if start() fails. [] disables."
+      },
+      "maxConcurrentSessions": { "type": "number", "default": 5 },
+      "sessionTTLMs": {
+        "type": "number",
+        "description": "Idle TTL in milliseconds"
+      },
+      "cleanupIntervalMs": {
+        "type": "number",
+        "description": "Expiry sweep interval in milliseconds"
+      },
+      "engines": {
+        "type": "object",
+        "properties": {
+          "claude": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "defaultModel": { "type": "string" },
+              "cwd": { "type": "string" },
+              "env": { "type": "object" },
+              "enabled": { "type": "boolean" }
+            }
+          },
+          "codex": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "defaultModel": { "type": "string" },
+              "cwd": { "type": "string" },
+              "env": { "type": "object" },
+              "enabled": { "type": "boolean" }
+            }
+          },
+          "grok": {
+            "type": "object",
+            "properties": {
+              "defaultModel": { "type": "string" },
+              "apiKey": { "type": "string" },
+              "baseUrl": { "type": "string" },
+              "cwd": { "type": "string" },
+              "env": { "type": "object" },
+              "enabled": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "capabilities": {
+    "childProcess": true,
+    "networkAccess": ["api.x.ai"]
+  },
+  "contracts": {
+    "tools": [
+      "sb_session_start",
+      "sb_session_send",
+      "sb_session_stop",
+      "sb_session_list",
+      "sb_session_status",
+      "sb_session_overview",
+      "sb_engine_list",
+      "sb_engine_status",
+      "sb_model_route",
+      "sb_cost_report",
+      "sb_compact"
+    ],
+    "exports": {
+      "activate": "activate"
+    }
+  }
+}
