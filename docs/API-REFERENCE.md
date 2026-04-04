@@ -1,432 +1,152 @@
 # API Reference — sentinel-bridge
 
-All tools are registered under the `sb_` namespace to avoid collisions with other OpenClaw plugins.
+OpenClaw tools are registered under the `sb_` namespace. Shapes below match **`src/index.ts`** handlers and **`SessionManager`** return values.
+
+---
+
+## Configuration (`openclaw` plugin config)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `engines.claude` | `EngineConfig` | CLI command, `defaultModel`, `cwd`, `env`, `enabled` |
+| `engines.codex` | `EngineConfig` | Same |
+| `engines.grok` | `EngineConfig` | `apiKey`, `baseUrl`, `defaultModel`; Grok is **disabled** by default until configured |
+| `defaultEngine` | `"claude" \| "codex" \| "grok"` | When the caller omits engine |
+| `defaultModel` | string | Optional ref such as `claude/opus` or full model id |
+| `defaultFallbackChain` | engine[] | Order used after **primary** when session **start** fails. Default: `["claude", "codex", "grok"]`. Use `[]` to disable. |
+| `maxConcurrentSessions` | number | Cap active sessions |
+| `sessionTTLMs` | number | Idle TTL before expiry sweep |
+| `cleanupIntervalMs` | number | Expiry sweep interval |
+
+Internal `SessionManager` config maps `sessionTTLMs` → `ttlMs` (see `toSessionManagerConfig` in `src/index.ts`).
 
 ---
 
 ## Tools
 
-### sb_session_start
+### `sb_session_start`
 
-Start a new coding agent session with a specific engine.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `name` | string | no | auto-generated | Session name |
-| `cwd` | string | no | `~` | Working directory |
-| `engine` | `"claude" \| "codex" \| "grok"` | no | `"claude"` | Engine to use |
-| `model` | string | no | engine default | Model identifier or alias |
-| `permissionMode` | string | no | `"acceptEdits"` | Claude-specific: permission handling |
-| `effort` | `"low" \| "medium" \| "high" \| "max" \| "auto"` | no | `"auto"` | Effort/thinking level |
-| `maxTurns` | number | no | — | Max agent loop turns |
-| `maxBudgetUsd` | number | no | — | Spending cap (USD) |
-| `systemPrompt` | string | no | — | Override system prompt |
-| `appendSystemPrompt` | string | no | — | Append to system prompt |
-| `fallbackEngine` | string | no | — | Engine to fall back to on failure |
-| `resumeSessionId` | string | no | — | Resume a previous session by ID |
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "name": "claude-swift-falcon",
-  "engine": "claude",
-  "model": "claude-sonnet-4-6",
-  "cwd": "/home/user/project",
-  "created": "2026-04-04T01:00:00.000Z"
-}
-```
-
----
-
-### sb_session_send
-
-Send a message to an active session and get the response.
+Starts a session. If the primary engine’s `start()` fails, retries along **`defaultFallbackChain`** (see above). `resumeSessionId` is only applied to the **first** attempt.
 
 **Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `name` | string | **yes** | — | Session name |
-| `message` | string | **yes** | — | Message to send |
-| `effort` | string | no | session default | Override effort for this message |
-| `timeout` | number | no | 300000 | Timeout in ms |
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `name` | yes | Session name |
+| `engine` | no | `claude` / `codex` / `grok` |
+| `model` | no | Model id or alias (routing below) |
+| `cwd` | no | Working directory |
+| `resumeSessionId` | no | Engine-specific resume id |
 
-**Returns:**
-```json
-{
-  "ok": true,
-  "output": "I've created the file...",
-  "sessionId": "abc-123",
-  "stats": {
-    "turns": 3,
-    "tokensIn": 1500,
-    "tokensOut": 800,
-    "costUsd": 0.045
-  }
-}
-```
+**Returns:** `{ ok: true, session: { ... } }` — serialized `SessionInfo` (id, name, engine, model, status, costs, tokenCount, paths, engine state, lastError, etc.).
 
 ---
 
-### sb_session_stop
+### `sb_session_send`
 
-Stop an active session and clean up engine resources.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | **yes** | Session name |
-
-**Returns:** `{ "ok": true }`
+**Parameters:** `name`, `message` (required).  
+**Returns:** `{ ok, name, output, session, sessionId, stats }`.
 
 ---
 
-### sb_session_list
+### `sb_session_stop`
 
-List all active sessions with summary info.
-
-**Parameters:** None
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "sessions": [
-    {
-      "name": "claude-swift-falcon",
-      "engine": "claude",
-      "model": "claude-sonnet-4-6",
-      "cwd": "/home/user/project",
-      "created": "2026-04-04T01:00:00.000Z",
-      "isReady": true,
-      "isBusy": false,
-      "isPaused": false
-    }
-  ]
-}
-```
+**Parameters:** `name`.  
+**Returns:** `{ ok, name, status }`.
 
 ---
 
-### sb_session_status
+### `sb_session_list`
 
-Get detailed status of a single session including token counts, cost, and context usage.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | **yes** | Session name |
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "name": "claude-swift-falcon",
-  "engine": "claude",
-  "model": "claude-sonnet-4-6",
-  "isReady": true,
-  "isBusy": false,
-  "isPaused": false,
-  "stats": {
-    "turns": 12,
-    "toolCalls": 8,
-    "toolErrors": 0,
-    "tokensIn": 45000,
-    "tokensOut": 12000,
-    "cachedTokens": 30000,
-    "costUsd": 0.85,
-    "subscriptionCovered": true,
-    "contextPercent": 28,
-    "uptime": 3600
-  }
-}
-```
+**Returns:** `{ ok, sessions: SessionInfo[] }`.
 
 ---
 
-### sb_session_compact
+### `sb_session_status`
 
-Compact a session's context window by summarizing history.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | **yes** | Session name |
-| `summary` | string | no | Custom summary for compaction |
-
-**Returns:** `{ "ok": true }`
+**Parameters:** `name`.  
+**Returns:** `{ ok, session }` or throws if missing.
 
 ---
 
-### sb_engine_list
+### `sb_session_overview`
 
-List available engines and their readiness status.
-
-**Parameters:** None
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "engines": [
-    {
-      "type": "claude",
-      "available": true,
-      "binary": "/usr/local/bin/claude",
-      "authMethod": "subscription",
-      "authValid": true
-    },
-    {
-      "type": "codex",
-      "available": true,
-      "binary": "/usr/local/bin/codex",
-      "authMethod": "apiKey",
-      "authValid": true
-    },
-    {
-      "type": "grok",
-      "available": true,
-      "binary": null,
-      "authMethod": "apiKey",
-      "authValid": false,
-      "note": "XAI_API_KEY not set"
-    }
-  ]
-}
-```
+**Returns:** `{ ok, overview, engines }` — aggregate counts/costs plus per-engine descriptors.
 
 ---
 
-### sb_model_list
+### `sb_engine_list` / `sb_engine_status`
 
-List available models across all engines with pricing info.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `engine` | string | no | Filter by engine |
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "models": [
-    {
-      "engine": "claude",
-      "model": "claude-opus-4",
-      "aliases": ["opus"],
-      "pricing": { "input": 15.0, "output": 75.0, "cached": 1.5 },
-      "subscriptionCovered": true
-    },
-    {
-      "engine": "codex",
-      "model": "o4-mini",
-      "aliases": [],
-      "pricing": { "input": 1.1, "output": 4.4 },
-      "subscriptionCovered": false
-    }
-  ]
-}
-```
+List or inspect engine readiness (binary on PATH for CLIs, API key for Grok).
 
 ---
 
-### sb_session_switch_model
+### `sb_model_route`
 
-Switch the model for a running session. Restarts the engine process with resume capability where supported.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | **yes** | Session name |
-| `model` | string | **yes** | New model (name or alias) |
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "restarted": true,
-  "name": "claude-swift-falcon",
-  "model": "claude-opus-4",
-  "previousModel": "claude-sonnet-4-6"
-}
-```
+**Parameters:** `model` (required), `engine` (optional preference).  
+**Returns:** resolved `model`, `engine`, `subscriptionCovered`, `source`, plus `available` / `healthy` from descriptor.
 
 ---
 
-### sb_session_switch_engine
+### `sb_cost_report`
 
-Switch the engine for a running session. Stops the current engine and starts a new one in the same working directory.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | **yes** | Session name |
-| `engine` | `"claude" \| "codex" \| "grok"` | **yes** | New engine |
-| `model` | string | no | Model for the new engine |
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "name": "claude-swift-falcon",
-  "previousEngine": "claude",
-  "engine": "codex",
-  "model": "o4-mini"
-}
-```
+**Parameters:** optional `since` (ISO date string).  
+**Returns:** `{ ok, report }` with per-engine breakdown.
 
 ---
 
-### sb_cost_report
+### `sb_compact`
 
-Get aggregated cost report across all sessions.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `sessionName` | string | no | Filter to specific session |
-
-**Returns:**
-```json
-{
-  "ok": true,
-  "sessions": [
-    {
-      "name": "claude-swift-falcon",
-      "engine": "claude",
-      "model": "claude-sonnet-4-6",
-      "tokensIn": 45000,
-      "tokensOut": 12000,
-      "costUsd": 0.85,
-      "subscriptionCovered": true,
-      "actualCost": 0.0
-    }
-  ],
-  "totals": {
-    "totalCostUsd": 2.35,
-    "subscriptionSavings": 0.85,
-    "actualBilled": 1.50
-  }
-}
-```
+**Parameters:** `name`, optional `summary`.  
+**Returns:** compaction result + session snapshot (`compacted` field).
 
 ---
 
-## Session Lifecycle
+## Model routing
 
-```
-                    ┌─────────┐
-                    │  idle   │
-                    └────┬────┘
-                         │ sb_session_start
-                         ▼
-                    ┌─────────┐
-              ┌─────│  ready  │─────┐
-              │     └────┬────┘     │
-              │          │ send     │ stop
-              │          ▼          │
-              │     ┌─────────┐    │
-              │     │  busy   │    │
-              │     └────┬────┘    │
-              │          │ done    │
-              │          ▼          │
-              │     ┌─────────┐    │
-              │     │  ready  │────┘
-              │     └────┬────┘
-              │          │ TTL expires / stop
-              │          ▼
-              │     ┌─────────┐
-              └────▶│ stopped │
-                    └─────────┘
-```
+### Explicit engine prefix
 
-### States
+`claude/...`, `codex/...` or `openai/...`, `grok/...` or `xai/...` selects the engine; the remainder is the model path.
 
-| State | Description |
-|-------|-------------|
-| **idle** | No session exists |
-| **ready** | Engine is initialized, accepting messages |
-| **busy** | Engine is processing a message |
-| **paused** | Session is paused (messages rejected until resumed) |
-| **stopped** | Session terminated, resources cleaned up |
+### Auto-detection (no prefix)
 
-### Session Persistence
+Examples: `claude-*`, `opus`, `sonnet`, `haiku` → **Claude**; `gpt-*`, `codex`, `o4-*` → **Codex**; `grok-*`, `grok` → **Grok**.
 
-When a Claude session is stopped, its `sessionId` is persisted to `~/.openclaw/sentinel-sessions.json`. This enables resuming the conversation later via `resumeSessionId` parameter in `sb_session_start`.
+### Alias map (high level)
 
-Codex and Grok sessions are not resumable — their "persistence" is the working directory state.
+Defined in `src/session-manager.ts` (`MODEL_ALIASES`). Examples:
 
----
-
-## Engine Management
-
-### Engine Selection Logic
-
-```
-User specifies engine?
-  → Yes: use specified engine
-  → No: use config.defaultEngine (default: "claude")
-
-User specifies model?
-  → Yes: resolve alias → determine compatible engine if not specified
-  → No: use engine's default model
-```
-
-### Model Alias Resolution
-
-| Alias | Resolves To | Engine |
-|-------|-------------|--------|
-| `opus` | `claude-opus-4` | claude |
+| Alias / pattern | Resolves toward | Engine |
+|-----------------|-----------------|--------|
+| `opus` | `claude-opus-4-20250514` | claude |
 | `sonnet` | `claude-sonnet-4` | claude |
 | `haiku` | `claude-haiku-4` | claude |
-| `codex-mini` | `codex-mini` | codex |
-| `o4-mini` | `o4-mini` | codex |
+| `codex` | `gpt-5.4` | codex |
 | `grok-3` | `grok-3` | grok |
-| `grok-mini` | `grok-3-mini` | grok |
 
-### Engine Auto-Detection from Model
+Exact keys include additional synonyms (e.g. `grok-4-1-fast`); see source for the full map.
 
-If a user provides a model name without specifying an engine, the SessionManager infers the engine:
+### Priority
 
-- `claude-*` or aliases `opus/sonnet/haiku` → ClaudeEngine
-- `o4-*`, `codex-*`, `gpt-*` → CodexEngine
-- `grok-*` → GrokEngine
+1. Explicit `engine` + `model` (validated for consistency).  
+2. Model string (prefix, inference, aliases).  
+3. `defaultModel` / `defaultEngine` from config.
 
 ---
 
-## Model Routing
+## Fallback chain (start only)
 
-### Priority Order
+1. Resolve **primary** engine + model like a normal `startSession`.  
+2. Build order: **primary first**, then `defaultFallbackChain` entries, skipping duplicates.  
+3. On failure, **`stop()`** the failed engine best-effort, then try the next engine using that engine’s **default route** (`resolveDefaultRoute`), not the user’s Claude-only alias (so `opus` does not get forced onto Codex).  
+4. If all attempts fail, the **last** error is rethrown.
 
-1. **Explicit model in `sb_session_start`** — highest priority
-2. **Model alias resolution** — `opus` → `claude-opus-4`
-3. **Plugin config `defaultModel`** — fallback when no model specified
-4. **Engine default** — Claude: `claude-sonnet-4`, Codex: `o4-mini`, Grok: `grok-3`
+---
 
-### Runtime Model Switching
+## Session status values
 
-`sb_session_switch_model` allows changing the model mid-session:
+`active` | `stopped` | `expired` | `error` — see `SessionManager` and engine `status()` snapshots.
 
-- **Claude:** Restarts CLI process with `--resume` flag to preserve conversation
-- **Codex:** Next `send()` will use the new model (no restart needed)
-- **Grok:** Applies immediately to next API call (conversation history preserved in-memory)
+---
 
-### Engine Switching
-
-`sb_session_switch_engine` is a heavier operation:
-
-1. Stop current engine
-2. Persist any resumable state
-3. Start new engine in same working directory
-4. Conversation history is NOT transferred (engines have different context formats)
+Further architecture notes: [TECHNICAL-ARCHITECTURE.md](./TECHNICAL-ARCHITECTURE.md). Contributor onboarding and branch notes: [CONTEXT-HANDOFF.md](./CONTEXT-HANDOFF.md).

@@ -37,4 +37,12 @@ describe('default config', () => {
   it('default model references claude', () => {
     expect(DEFAULT_CONFIG.defaultModel).toContain('claude');
   });
+
+  it('defines default fallback chain claude then codex then grok', () => {
+    expect(DEFAULT_CONFIG.defaultFallbackChain).toEqual([
+      'claude',
+      'codex',
+      'grok',
+    ]);
+  });
 });

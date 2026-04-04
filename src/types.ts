@@ -59,6 +59,11 @@ export interface SentinelBridgeConfig {
   defaultCwd?: string;
   defaultEngine?: EngineKind;
   defaultModel?: string;
+  /**
+   * When starting a session fails, try the next engine in this order after the primary.
+   * Primary is always attempted first. Use [] to disable fallback retries.
+   */
+  defaultFallbackChain?: EngineKind[];
   claude?: Partial<EngineConfig>;
   codex?: Partial<EngineConfig>;
   grok?: Partial<EngineConfig>;

@@ -39,9 +39,11 @@ const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_CONCURRENT_SESSIONS = 8;
 
+const DEFAULT_FALLBACK_CHAIN: EngineKind[] = ['claude', 'codex', 'grok'];
+
 const MODEL_ALIASES: Record<EngineKind, Record<string, string>> = {
   claude: {
-    opus: 'claude-opus-4-6',
+    opus: 'claude-opus-4-20250514',
     'opus-4.6': 'claude-opus-4-6',
     'claude-opus-4': 'claude-opus-4-6',
     sonnet: 'claude-sonnet-4',
@@ -93,18 +95,38 @@ export class SessionManager {
   }
 
   async startSession(options: SessionStartOptions): Promise<SessionInfo> {
-    const route = options.model
+    const primaryRoute = options.model
       ? this.resolveModelRoute(options.model, options.engine)
       : this.resolveDefaultRoute(options.engine);
-    const engine = options.engine ?? route.engine;
+    const primaryEngine = options.engine ?? primaryRoute.engine;
+    const enginesToTry = this.expandFallbackChain(primaryEngine);
 
-    await this.start(options.name, engine, {
-      cwd: options.cwd,
-      model: route.model,
-      resumeSessionId: options.resumeSessionId,
-    });
+    let lastError: unknown;
+    for (let index = 0; index < enginesToTry.length; index++) {
+      const engine = enginesToTry[index]!;
+      const route =
+        index === 0 ? primaryRoute : this.resolveDefaultRoute(engine);
 
-    return this.requireSessionInfo(options.name);
+      try {
+        await this.start(options.name, engine, {
+          cwd: options.cwd,
+          model: route.model,
+          resumeSessionId: index === 0 ? options.resumeSessionId : undefined,
+        });
+
+        return this.requireSessionInfo(options.name);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (lastError instanceof Error) {
+      throw lastError;
+    }
+
+    throw new Error(
+      `Failed to start session "${options.name}" after trying engines: ${enginesToTry.join(', ')}.`,
+    );
   }
 
   async sendMessage(name: string, message: string): Promise<SendMessageResult> {
@@ -349,6 +371,9 @@ export class SessionManager {
     try {
       await engineInstance.start();
     } catch (error) {
+      void engineInstance.stop().catch(() => {
+        // Best-effort cleanup after a failed start so fallback can proceed cleanly.
+      });
       throw this.wrapSessionError('start', name, engine, error);
     }
 
@@ -765,5 +790,35 @@ export class SessionManager {
     return new Error(
       `Failed to ${action} ${engine} session "${name}": ${message}`,
     );
+  }
+
+  /**
+   * Primary engine is always first; remaining engines follow plugin order without duplicates.
+   */
+  private expandFallbackChain(primary: EngineKind): EngineKind[] {
+    const configured = this.config.defaultFallbackChain;
+    const chain =
+      configured === undefined ? DEFAULT_FALLBACK_CHAIN : configured;
+
+    if (!chain.length) {
+      return [primary];
+    }
+
+    const seen = new Set<EngineKind>();
+    const ordered: EngineKind[] = [];
+
+    if (!seen.has(primary)) {
+      seen.add(primary);
+      ordered.push(primary);
+    }
+
+    for (const engine of chain) {
+      if (!seen.has(engine)) {
+        seen.add(engine);
+        ordered.push(engine);
+      }
+    }
+
+    return ordered;
   }
 }
