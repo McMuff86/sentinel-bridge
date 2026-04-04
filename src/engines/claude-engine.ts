@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 
 import type {
   EngineConfig,
@@ -48,6 +48,7 @@ export class ClaudeEngine implements IEngine {
   };
   private activeProcess: any = null;
   private sentAtLeastOnePrompt = false;
+  private stoppingFlag = false;
 
   constructor(config: EngineConfig) {
     this.config = {
@@ -70,6 +71,24 @@ export class ClaudeEngine implements IEngine {
       this.state = "error";
       this.usage.lastError = "Claude model is required.";
       throw new Error(this.usage.lastError);
+    }
+
+    // Validate that claude CLI is available
+    const command = this.config.command ?? "claude";
+    try {
+      execFileSync(command, ["--version"], {
+        timeout: 10_000,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...(process?.env ?? {}), ...(this.config.env ?? {}) },
+      });
+    } catch (error) {
+      this.state = "error";
+      const msg =
+        this.isJsonRecord(error) && error.code === "ENOENT"
+          ? `Claude CLI not found at '${command}'. Install claude and ensure it is on PATH.`
+          : `Claude CLI validation failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.usage.lastError = msg;
+      throw new Error(msg);
     }
 
     if (!this.sessionId) {
@@ -118,7 +137,9 @@ export class ClaudeEngine implements IEngine {
       this.usage.lastResponseAt = new Date();
       this.sessionId = result.sessionId ?? this.sessionId;
       this.sentAtLeastOnePrompt = true;
-      this.state = "running";
+      if (!this.stoppingFlag) {
+        this.state = "running";
+      }
 
       return result.text;
     } catch (error) {
@@ -134,6 +155,7 @@ export class ClaudeEngine implements IEngine {
 
   async stop(): Promise<void> {
     this.state = "stopping";
+    this.stoppingFlag = true;
 
     if (this.activeProcess) {
       const processToStop = this.activeProcess;
@@ -275,6 +297,18 @@ export class ClaudeEngine implements IEngine {
         if (stdoutBuffer.trim()) {
           stdoutBuffer += "\n";
           flushStdout();
+        }
+
+        // If we're stopping, resolve gracefully with whatever we have
+        if (this.stoppingFlag) {
+          const text = finalResultText || messageSnapshot || streamText.trim();
+          resolve({
+            text,
+            sessionId: observedSessionId,
+            usage: usageDelta,
+            totalCostUsd,
+          });
+          return;
         }
 
         if (timedOut) {
