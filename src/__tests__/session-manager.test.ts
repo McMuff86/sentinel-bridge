@@ -18,7 +18,7 @@ const hoisted = vi.hoisted(() => {
     status = () => ({
       state: 'running' as const,
       sessionId: null,
-      model: 'claude-opus-4-20250514',
+      model: 'claude-opus-4-6',
       usage: idleUsage,
     });
     getSessionId = () => null;
@@ -89,12 +89,12 @@ describe('SessionManager', () => {
   });
 
   describe('resolveModelRoute', () => {
-    it('should map opus alias to claude-opus-4-20250514', () => {
+    it('should map opus alias to claude-opus-4-6', () => {
       const manager = new SessionManager({});
       const route = manager.resolveModelRoute('opus');
 
       expect(route.engine).toBe('claude');
-      expect(route.model).toBe('claude-opus-4-20250514');
+      expect(route.model).toBe('claude-opus-4-6');
       expect(route.source).toBe('alias');
     });
 

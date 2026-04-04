@@ -33,7 +33,7 @@ OpenClaw plugin that exposes **Claude Code CLI**, **Codex CLI**, and **Grok (HTT
 
 - **Prefix form:** `claude/...`, `codex/...` or `openai/...`, `grok/...` or `xai/...` forces engine.
 - **Inference:** e.g. `claude-*`, `opus` / `sonnet` / `haiku` → Claude; `gpt-*`, `codex` → Codex; `grok-*` → Grok.
-- **Aliases:** per-engine map in `MODEL_ALIASES` inside `session-manager.ts` (e.g. `opus` → `claude-opus-4-20250514`, `codex` → `gpt-5.4`).
+- **Aliases:** per-engine map in `MODEL_ALIASES` inside `session-manager.ts` (e.g. `opus` → `claude-opus-4-6`, `codex` → `gpt-5.4`).
 
 ## Fallback chain (current behavior)
 
