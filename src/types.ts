@@ -40,7 +40,7 @@ export type EngineStatusSnapshot = {
 export type EngineConfig = {
   command?: string;
   args?: string[];
-  env?: NodeJS.ProcessEnv;
+  env?: Record<string, string | undefined>;
   model: string;
   cwd?: string;
   resumeSessionId?: string;
