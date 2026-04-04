@@ -1,8 +1,24 @@
 declare const process:
   | {
+      platform?: string;
       env?: Record<string, string | undefined>;
     }
   | undefined;
+
+declare module 'node:fs' {
+  export const constants: {
+    X_OK: number;
+  };
+
+  export function accessSync(path: string, mode?: number): void;
+}
+
+declare module 'node:path' {
+  export const delimiter: string;
+
+  export function isAbsolute(path: string): boolean;
+  export function resolve(...paths: string[]): string;
+}
 
 declare module "node:child_process" {
   export function spawn(

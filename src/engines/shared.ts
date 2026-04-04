@@ -122,6 +122,24 @@ export function toStringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+export function buildCompactPrompt(summary?: string): string {
+  if (summary?.trim()) {
+    return [
+      'Compact the current session into a continuation summary.',
+      'Preserve the current objective, relevant repository state,',
+      'important decisions, open risks, and the next concrete steps.',
+      'Use this additional instruction while compacting:',
+      summary.trim(),
+    ].join('\n');
+  }
+
+  return [
+    'Compact the current session into a continuation summary.',
+    'Preserve the current objective, relevant repository state,',
+    'important decisions, open risks, and the next concrete steps.',
+  ].join('\n');
+}
+
 function mergeEnv(
   baseEnv?: Record<string, string | undefined>,
   overrideEnv?: Record<string, string | undefined>,

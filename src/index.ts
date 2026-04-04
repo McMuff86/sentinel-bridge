@@ -5,37 +5,99 @@
  * CLI backend providers.
  */
 
-import { PLUGIN_META, DEFAULT_CONFIG } from './plugin.js';
-import type { SentinelBridgeConfig } from './plugin.js';
+import { accessSync, constants } from 'node:fs';
+import { delimiter, isAbsolute, resolve as resolvePath } from 'node:path';
+
+import { DEFAULT_CONFIG, PLUGIN_META } from './plugin.js';
+import type {
+  EngineConfig as PluginEngineConfig,
+  SentinelBridgeConfig,
+} from './plugin.js';
+import { SessionManager } from './session-manager.js';
 
 /* ── Re-exports for library use ───────────────────────────────── */
 
 export { PLUGIN_META, DEFAULT_CONFIG } from './plugin.js';
 export type { SentinelBridgeConfig, EngineConfig } from './plugin.js';
-export type { IEngine, ISession, EngineState, ModelPricing } from './types.js';
+export type {
+  CostReport,
+  EngineKind,
+  EngineState,
+  IEngine,
+  ISession,
+  ModelPricing,
+  ModelRoute,
+  SendMessageResult,
+  SessionInfo,
+  SessionOverview,
+} from './types.js';
 
-/* ── Tool definitions ─────────────────────────────────────────── */
+type EngineKind = 'claude' | 'codex' | 'grok';
 
 interface ToolDef {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  handler: (params: Record<string, unknown>, ctx: PluginContext) => Promise<unknown>;
+  handler: (
+    params: Record<string, unknown>,
+    ctx: PluginContext,
+  ) => Promise<unknown>;
 }
 
 interface PluginContext {
   config: SentinelBridgeConfig;
-  // SessionManager instance would live here at runtime
+  manager: SessionManager;
 }
+
+interface ToolHandlerResponse {
+  ok: boolean;
+  [key: string]: unknown;
+}
+
+interface EngineDescriptor {
+  id: EngineKind;
+  enabled: boolean;
+  available: boolean;
+  healthy: boolean;
+  binary: string | null;
+  authMethod: string;
+  authValid: boolean;
+  model: string | null;
+  note?: string;
+}
+
+interface PluginLogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+interface PluginApi {
+  registerTool: (tool: {
+    name: string;
+    description: string;
+    parameters: unknown;
+    handler: (...args: unknown[]) => Promise<unknown>;
+  }) => void;
+  registerCliBackend?: (id: string, config: Record<string, unknown>) => void;
+  getConfig?: () => Record<string, unknown>;
+  logger?: PluginLogger;
+}
+
+const ENGINE_KINDS: EngineKind[] = ['claude', 'codex', 'grok'];
+const DEFAULT_ENGINE_COMMANDS: Record<EngineKind, string | undefined> = {
+  claude: 'claude',
+  codex: 'codex',
+  grok: undefined,
+};
 
 /**
  * Build the full tool catalogue.
- * Each tool delegates to the SessionManager; actual wiring happens
- * inside `activate()` once the OpenClaw plugin API is available.
+ * Each tool delegates to the SessionManager and uses local health/config
+ * helpers where direct engine probing is needed.
  */
 function buildTools(): ToolDef[] {
   return [
-    /* ── Session lifecycle ────────────────────────────────────── */
     {
       name: 'sb_session_start',
       description:
@@ -46,16 +108,31 @@ function buildTools(): ToolDef[] {
           name: { type: 'string', description: 'Human-readable session name' },
           engine: {
             type: 'string',
-            enum: ['claude', 'codex', 'grok'],
+            enum: ENGINE_KINDS,
             description: 'Engine to use (default: from config)',
           },
           model: { type: 'string', description: 'Model override' },
           cwd: { type: 'string', description: 'Working directory for the session' },
+          resumeSessionId: {
+            type: 'string',
+            description: 'Resume an existing engine session when supported',
+          },
         },
         required: ['name'],
       },
-      handler: async (params, _ctx) => {
-        return { status: 'ok', session: params.name, note: 'stub — wire to SessionManager' };
+      handler: async (params, ctx) => {
+        const session = await ctx.manager.startSession({
+          name: readRequiredString(params, 'name'),
+          engine: readEngineKind(params, 'engine'),
+          model: readOptionalString(params, 'model'),
+          cwd: readOptionalString(params, 'cwd'),
+          resumeSessionId: readOptionalString(params, 'resumeSessionId'),
+        });
+
+        return {
+          ok: true,
+          session: serializeSession(session),
+        } satisfies ToolHandlerResponse;
       },
     },
     {
@@ -69,8 +146,13 @@ function buildTools(): ToolDef[] {
         },
         required: ['name', 'message'],
       },
-      handler: async (params, _ctx) => {
-        return { status: 'ok', response: `echo: ${params.message}` };
+      handler: async (params, ctx) => {
+        const result = await ctx.manager.sendMessage(
+          readRequiredString(params, 'name'),
+          readRequiredString(params, 'message'),
+        );
+
+        return serializeTurnResult(result);
       },
     },
     {
@@ -83,16 +165,27 @@ function buildTools(): ToolDef[] {
         },
         required: ['name'],
       },
-      handler: async (params, _ctx) => {
-        return { status: 'ok', stopped: params.name };
+      handler: async (params, ctx) => {
+        const name = readRequiredString(params, 'name');
+        await ctx.manager.stopSession(name);
+        const session = ctx.manager.getSessionStatus(name);
+
+        return {
+          ok: true,
+          name,
+          status: session?.status ?? 'stopped',
+        } satisfies ToolHandlerResponse;
       },
     },
     {
       name: 'sb_session_list',
       description: 'List all active sessions with basic metadata.',
       parameters: { type: 'object', properties: {} },
-      handler: async (_params, _ctx) => {
-        return { sessions: [] };
+      handler: async (_params, ctx) => {
+        return {
+          ok: true,
+          sessions: ctx.manager.listSessions().map(serializeSession),
+        } satisfies ToolHandlerResponse;
       },
     },
     {
@@ -105,32 +198,50 @@ function buildTools(): ToolDef[] {
         },
         required: ['name'],
       },
-      handler: async (params, _ctx) => {
-        return { session: params.name, status: 'unknown' };
+      handler: async (params, ctx) => {
+        const name = readRequiredString(params, 'name');
+        const session = ctx.manager.getSessionStatus(name);
+        if (!session) {
+          throw new Error(`Session "${name}" not found.`);
+        }
+
+        return {
+          ok: true,
+          session: serializeSession(session),
+        } satisfies ToolHandlerResponse;
       },
     },
     {
       name: 'sb_session_overview',
       description: 'High-level overview: active sessions, total cost, engine health.',
       parameters: { type: 'object', properties: {} },
-      handler: async (_params, _ctx) => {
-        return { totalSessions: 0, totalCostUsd: 0, engines: {} };
+      handler: async (_params, ctx) => {
+        const overview = ctx.manager.getOverview();
+        const engines = Object.fromEntries(
+          ENGINE_KINDS.map((engine) => [
+            engine,
+            getEngineDescriptor(engine, ctx.config),
+          ]),
+        );
+
+        return {
+          ok: true,
+          overview: serializeOverview(overview),
+          engines,
+        } satisfies ToolHandlerResponse;
       },
     },
-
-    /* ── Engine management ────────────────────────────────────── */
     {
       name: 'sb_engine_list',
       description: 'List available engines and their configuration status.',
       parameters: { type: 'object', properties: {} },
-      handler: async (_params, _ctx) => {
+      handler: async (_params, ctx) => {
         return {
-          engines: [
-            { id: 'claude', status: 'available', auth: 'subscription' },
-            { id: 'codex', status: 'available', auth: 'subscription' },
-            { id: 'grok', status: 'needs-api-key', auth: 'api-key' },
-          ],
-        };
+          ok: true,
+          engines: ENGINE_KINDS.map((engine) =>
+            getEngineDescriptor(engine, ctx.config),
+          ),
+        } satisfies ToolHandlerResponse;
       },
     },
     {
@@ -139,16 +250,22 @@ function buildTools(): ToolDef[] {
       parameters: {
         type: 'object',
         properties: {
-          engine: { type: 'string', enum: ['claude', 'codex', 'grok'] },
+          engine: { type: 'string', enum: ENGINE_KINDS },
         },
         required: ['engine'],
       },
-      handler: async (params, _ctx) => {
-        return { engine: params.engine, healthy: true };
+      handler: async (params, ctx) => {
+        const engine = readEngineKind(params, 'engine');
+        if (!engine) {
+          throw new Error('Engine is required.');
+        }
+
+        return {
+          ok: true,
+          engine: getEngineDescriptor(engine, ctx.config),
+        } satisfies ToolHandlerResponse;
       },
     },
-
-    /* ── Routing & cost ───────────────────────────────────────── */
     {
       name: 'sb_model_route',
       description:
@@ -157,13 +274,27 @@ function buildTools(): ToolDef[] {
         type: 'object',
         properties: {
           model: { type: 'string', description: 'Model ref, e.g. "claude/opus-4.6"' },
+          engine: {
+            type: 'string',
+            enum: ENGINE_KINDS,
+            description: 'Optional preferred engine when the model is ambiguous',
+          },
         },
         required: ['model'],
       },
-      handler: async (params, _ctx) => {
-        const model = params.model as string;
-        const engine = model.startsWith('grok') ? 'grok' : model.startsWith('codex') ? 'codex' : 'claude';
-        return { model, engine, subscriptionCovered: engine !== 'grok' };
+      handler: async (params, ctx) => {
+        const route = ctx.manager.resolveModelRoute(
+          readRequiredString(params, 'model'),
+          readEngineKind(params, 'engine'),
+        );
+        const engineStatus = getEngineDescriptor(route.engine, ctx.config);
+
+        return {
+          ok: true,
+          ...route,
+          available: engineStatus.available,
+          healthy: engineStatus.healthy,
+        } satisfies ToolHandlerResponse;
       },
     },
     {
@@ -175,8 +306,13 @@ function buildTools(): ToolDef[] {
           since: { type: 'string', description: 'ISO date, e.g. "2026-04-04"' },
         },
       },
-      handler: async (_params, _ctx) => {
-        return { totalUsd: 0, byEngine: {}, subscriptionSaved: 0 };
+      handler: async (params, ctx) => {
+        return {
+          ok: true,
+          report: serializeCostReport(
+            ctx.manager.getCostReport(readOptionalString(params, 'since')),
+          ),
+        } satisfies ToolHandlerResponse;
       },
     },
     {
@@ -186,11 +322,23 @@ function buildTools(): ToolDef[] {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Session name' },
+          summary: {
+            type: 'string',
+            description: 'Optional compaction guidance or custom summary target',
+          },
         },
         required: ['name'],
       },
-      handler: async (params, _ctx) => {
-        return { compacted: params.name };
+      handler: async (params, ctx) => {
+        const result = await ctx.manager.compactSession(
+          readRequiredString(params, 'name'),
+          readOptionalString(params, 'summary'),
+        );
+
+        return {
+          ...serializeTurnResult(result),
+          compacted: result.name,
+        } satisfies ToolHandlerResponse;
       },
     },
   ];
@@ -203,16 +351,21 @@ function buildTools(): ToolDef[] {
  *
  * @param api - OpenClaw plugin API handle
  */
-export function activate(api: {
-  registerTool: (tool: { name: string; description: string; parameters: unknown; handler: (...args: unknown[]) => Promise<unknown> }) => void;
-  registerCliBackend?: (id: string, config: Record<string, unknown>) => void;
-  getConfig?: () => Record<string, unknown>;
-}) {
+export function activate(api: PluginApi): void {
   const userConfig = (api.getConfig?.() ?? {}) as Partial<SentinelBridgeConfig>;
-  const config: SentinelBridgeConfig = { ...DEFAULT_CONFIG, ...userConfig };
-  const ctx: PluginContext = { config };
+  const config: SentinelBridgeConfig = {
+    ...DEFAULT_CONFIG,
+    ...userConfig,
+    engines: {
+      ...DEFAULT_CONFIG.engines,
+      ...userConfig.engines,
+    },
+  };
+  const ctx: PluginContext = {
+    config,
+    manager: new SessionManager(toSessionManagerConfig(config)),
+  };
 
-  /* Register all tools */
   const tools = buildTools();
   for (const tool of tools) {
     api.registerTool({
@@ -226,12 +379,17 @@ export function activate(api: {
     });
   }
 
-  /* Register CLI backends so OpenClaw can route model refs */
   if (api.registerCliBackend) {
     if (config.engines?.claude?.enabled !== false) {
       api.registerCliBackend('sentinel-claude', {
         command: config.engines?.claude?.command ?? 'claude',
-        args: ['-p', '--output-format', 'stream-json', '--permission-mode', 'bypassPermissions'],
+        args: [
+          '-p',
+          '--output-format',
+          'stream-json',
+          '--permission-mode',
+          'bypassPermissions',
+        ],
         modelArg: '--model',
         sessionArg: '--session-id',
         sessionMode: 'always',
@@ -251,5 +409,295 @@ export function activate(api: {
     }
   }
 
-  console.log(`[sentinel-bridge] activated — ${tools.length} tools registered`);
+  api.logger?.info(
+    `[sentinel-bridge] activated with ${tools.length} registered tools.`,
+  );
+}
+
+function readRequiredString(
+  params: Record<string, unknown>,
+  key: string,
+): string {
+  const value = params[key];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Parameter "${key}" must be a non-empty string.`);
+  }
+
+  return value.trim();
+}
+
+function readOptionalString(
+  params: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = params[key];
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue ? trimmedValue : undefined;
+}
+
+function readEngineKind(
+  params: Record<string, unknown>,
+  key: string,
+): EngineKind | undefined {
+  const value = readOptionalString(params, key);
+  if (!value) {
+    return undefined;
+  }
+
+  if (ENGINE_KINDS.includes(value as EngineKind)) {
+    return value as EngineKind;
+  }
+
+  throw new Error(
+    `Parameter "${key}" must be one of: ${ENGINE_KINDS.join(', ')}.`,
+  );
+}
+
+function serializeTurnResult(result: {
+  name: string;
+  output: string;
+  session: ReturnType<SessionManager['getSessionStatus']> extends infer T
+    ? Exclude<T, undefined>
+    : never;
+}): ToolHandlerResponse {
+  return {
+    ok: true,
+    name: result.name,
+    output: result.output,
+    sessionId: result.session.engineSessionId,
+    session: serializeSession(result.session),
+    stats: {
+      tokensIn: result.session.tokenCount.input,
+      tokensOut: result.session.tokenCount.output,
+      cachedTokens: result.session.tokenCount.cachedInput,
+      costUsd: result.session.costUsd,
+    },
+  };
+}
+
+function serializeSession(session: {
+  id: string;
+  name: string;
+  engine: EngineKind;
+  model: string;
+  status: string;
+  createdAt: Date;
+  costUsd: number;
+  tokenCount: {
+    input: number;
+    output: number;
+    cachedInput: number;
+    total: number;
+  };
+  cwd: string | null;
+  engineState: string;
+  engineSessionId: string | null;
+  lastTouchedAt: Date;
+  lastError?: string;
+}): Record<string, unknown> {
+  return {
+    id: session.id,
+    name: session.name,
+    engine: session.engine,
+    model: session.model,
+    status: session.status,
+    createdAt: session.createdAt.toISOString(),
+    costUsd: session.costUsd,
+    tokenCount: { ...session.tokenCount },
+    cwd: session.cwd,
+    engineState: session.engineState,
+    engineSessionId: session.engineSessionId,
+    lastTouchedAt: session.lastTouchedAt.toISOString(),
+    lastError: session.lastError,
+    subscriptionCovered: session.engine === 'claude',
+  };
+}
+
+function serializeOverview(overview: ReturnType<SessionManager['getOverview']>) {
+  return {
+    ...overview,
+    byEngine: Object.fromEntries(
+      Object.entries(overview.byEngine).map(([engine, breakdown]) => [
+        engine,
+        serializeEngineBreakdown(breakdown),
+      ]),
+    ),
+  };
+}
+
+function serializeCostReport(
+  report: ReturnType<SessionManager['getCostReport']>,
+): Record<string, unknown> {
+  return {
+    ...report,
+    byEngine: Object.fromEntries(
+      Object.entries(report.byEngine).map(([engine, breakdown]) => [
+        engine,
+        serializeEngineBreakdown(breakdown),
+      ]),
+    ),
+  };
+}
+
+function serializeEngineBreakdown(breakdown: {
+  sessionCount: number;
+  costUsd: number;
+  tokenCount: {
+    input: number;
+    output: number;
+    cachedInput: number;
+    total: number;
+  };
+}): Record<string, unknown> {
+  return {
+    sessionCount: breakdown.sessionCount,
+    costUsd: breakdown.costUsd,
+    tokenCount: { ...breakdown.tokenCount },
+  };
+}
+
+function toSessionManagerConfig(
+  config: SentinelBridgeConfig,
+): import('./types.js').SentinelBridgeConfig {
+  return {
+    ttlMs: config.sessionTTLMs,
+    cleanupIntervalMs: config.cleanupIntervalMs,
+    maxConcurrentSessions: config.maxConcurrentSessions,
+    defaultEngine: config.defaultEngine,
+    defaultModel: config.defaultModel,
+    claude: normalizeEngineConfig(config.engines?.claude),
+    codex: normalizeEngineConfig(config.engines?.codex),
+    grok: normalizeEngineConfig(config.engines?.grok),
+  };
+}
+
+function normalizeEngineConfig(
+  config?: PluginEngineConfig,
+): Partial<import('./types.js').EngineConfig> | undefined {
+  if (!config) {
+    return undefined;
+  }
+
+  return {
+    command: config.command,
+    args: config.args,
+    env: config.env,
+    model: config.defaultModel ?? '',
+    cwd: config.cwd,
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl,
+  };
+}
+
+function getEngineDescriptor(
+  engine: EngineKind,
+  config: SentinelBridgeConfig,
+): EngineDescriptor {
+  const engineConfig = config.engines?.[engine];
+  const enabled = engineConfig?.enabled !== false;
+  const model = engineConfig?.defaultModel ?? null;
+
+  if (!enabled) {
+    return {
+      id: engine,
+      enabled,
+      available: false,
+      healthy: false,
+      binary: null,
+      authMethod: engine === 'grok' ? 'api-key' : 'cli',
+      authValid: false,
+      model,
+      note: 'Engine is disabled in plugin config.',
+    };
+  }
+
+  if (engine === 'grok') {
+    const apiKey = resolveGrokApiKey(config);
+    return {
+      id: engine,
+      enabled,
+      available: Boolean(apiKey),
+      healthy: Boolean(apiKey),
+      binary: null,
+      authMethod: 'api-key',
+      authValid: Boolean(apiKey),
+      model,
+      note: apiKey ? undefined : 'Set XAI_API_KEY or configure engines.grok.apiKey.',
+    };
+  }
+
+  const command = engineConfig?.command ?? DEFAULT_ENGINE_COMMANDS[engine];
+  const binary = resolveCommandPath(command);
+  const authMethod = engine === 'claude' ? 'subscription-cli' : 'cli';
+
+  return {
+    id: engine,
+    enabled,
+    available: Boolean(binary),
+    healthy: Boolean(binary),
+    binary,
+    authMethod,
+    authValid: Boolean(binary),
+    model,
+    note: binary
+      ? undefined
+      : `Command "${command ?? DEFAULT_ENGINE_COMMANDS[engine]}" not found on PATH.`,
+  };
+}
+
+function resolveGrokApiKey(config: SentinelBridgeConfig): string | undefined {
+  return (
+    config.engines?.grok?.apiKey ??
+    config.engines?.grok?.env?.XAI_API_KEY ??
+    process?.env?.XAI_API_KEY
+  );
+}
+
+function resolveCommandPath(command?: string): string | null {
+  if (!command) {
+    return null;
+  }
+
+  if (isAbsolute(command) || command.includes('/') || command.includes('\\')) {
+    const absolutePath = isAbsolute(command)
+      ? command
+      : resolvePath(command);
+    return isExecutable(absolutePath) ? absolutePath : null;
+  }
+
+  const pathValue = process?.env?.PATH ?? '';
+  const extensions =
+    process?.platform === 'win32'
+      ? (process?.env?.PATHEXT ?? '.EXE;.CMD;.BAT;.COM')
+          .split(';')
+          .filter(Boolean)
+      : [''];
+
+  for (const directory of pathValue.split(delimiter)) {
+    if (!directory) {
+      continue;
+    }
+
+    for (const extension of extensions) {
+      const candidatePath = resolvePath(directory, `${command}${extension}`);
+      if (isExecutable(candidatePath)) {
+        return candidatePath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isExecutable(filePath: string): boolean {
+  try {
+    accessSync(filePath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }

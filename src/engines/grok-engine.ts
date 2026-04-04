@@ -7,6 +7,7 @@ import type {
   ModelPricing,
 } from "../types.js";
 import {
+  buildCompactPrompt,
   calculateLinearUsageCost,
   emptyTokenUsage,
   mergeEngineConfig,
@@ -163,6 +164,18 @@ export class GrokEngine implements IEngine {
       clearTimeout(timeoutHandle);
       this.activeAbortController = null;
     }
+  }
+
+  async compact(summary?: string): Promise<string> {
+    const compactedSummary = await this.send(buildCompactPrompt(summary));
+    this.messages = [
+      {
+        role: 'assistant',
+        content: compactedSummary,
+      },
+    ];
+
+    return compactedSummary;
   }
 
   async stop(): Promise<void> {

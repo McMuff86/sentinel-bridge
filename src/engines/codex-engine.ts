@@ -9,6 +9,7 @@ import type {
   ModelPricing,
 } from "../types.js";
 import {
+  buildCompactPrompt,
   calculateLinearUsageCost,
   emptyTokenUsage,
   mergeEngineConfig,
@@ -107,6 +108,10 @@ export class CodexEngine implements IEngine {
       this.usage.lastError = error instanceof Error ? error.message : String(error);
       throw error;
     }
+  }
+
+  async compact(summary?: string): Promise<string> {
+    return this.send(buildCompactPrompt(summary));
   }
 
   async stop(): Promise<void> {

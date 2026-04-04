@@ -1,43 +1,45 @@
 export type EngineState =
-  | "idle"
-  | "starting"
-  | "running"
-  | "stopping"
-  | "stopped"
-  | "error";
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'error';
 
-export type SessionStatus = "active" | "stopped" | "expired" | "error";
+export type SessionStatus = 'active' | 'stopped' | 'expired' | 'error';
 
-export type EngineKind = "claude" | "codex" | "grok";
+export type EngineKind = 'claude' | 'codex' | 'grok';
 
-export type ModelPricing = {
+export type ModelRouteSource = 'explicit' | 'alias' | 'default';
+
+export interface ModelPricing {
   inputPer1M: number;
   outputPer1M: number;
   cachedInputPer1M: number;
-};
+}
 
-export type TokenUsage = {
+export interface TokenUsage {
   input: number;
   output: number;
   cachedInput: number;
   total: number;
-};
+}
 
-export type EngineUsageSnapshot = {
+export interface EngineUsageSnapshot {
   costUsd: number;
   tokenCount: TokenUsage;
   lastError?: string;
   lastResponseAt?: Date;
-};
+}
 
-export type EngineStatusSnapshot = {
+export interface EngineStatusSnapshot {
   state: EngineState;
   sessionId: string | null;
   model: string;
   usage: EngineUsageSnapshot;
-};
+}
 
-export type EngineConfig = {
+export interface EngineConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string | undefined>;
@@ -48,21 +50,24 @@ export type EngineConfig = {
   apiKey?: string;
   baseUrl?: string;
   pricing?: Partial<ModelPricing>;
-};
+}
 
-export type SentinelBridgeConfig = {
+export interface SentinelBridgeConfig {
   ttlMs?: number;
   cleanupIntervalMs?: number;
   maxConcurrentSessions?: number;
   defaultCwd?: string;
+  defaultEngine?: EngineKind;
+  defaultModel?: string;
   claude?: Partial<EngineConfig>;
   codex?: Partial<EngineConfig>;
   grok?: Partial<EngineConfig>;
-};
+}
 
 export interface IEngine {
   start(config?: Partial<EngineConfig>): Promise<void>;
   send(message: string): Promise<string>;
+  compact(summary?: string): Promise<string>;
   stop(): Promise<void>;
   status(): EngineStatusSnapshot;
   getSessionId(): string | null;
@@ -76,4 +81,58 @@ export interface ISession {
   createdAt: Date;
   costUsd: number;
   tokenCount: TokenUsage;
+}
+
+export interface SessionStartOptions {
+  name: string;
+  engine?: EngineKind;
+  model?: string;
+  cwd?: string;
+  resumeSessionId?: string;
+}
+
+export interface SessionInfo extends ISession {
+  name: string;
+  cwd: string | null;
+  engineState: EngineState;
+  engineSessionId: string | null;
+  lastTouchedAt: Date;
+  lastError?: string;
+}
+
+export interface SendMessageResult {
+  name: string;
+  output: string;
+  session: SessionInfo;
+}
+
+export interface EngineCostBreakdown {
+  sessionCount: number;
+  costUsd: number;
+  tokenCount: TokenUsage;
+}
+
+export interface SessionOverview {
+  totalSessions: number;
+  activeSessions: number;
+  stoppedSessions: number;
+  expiredSessions: number;
+  errorSessions: number;
+  totalCostUsd: number;
+  byEngine: Record<EngineKind, EngineCostBreakdown>;
+}
+
+export interface CostReport {
+  since: string | null;
+  totalUsd: number;
+  trackedUsd: number;
+  byEngine: Record<EngineKind, EngineCostBreakdown>;
+  subscriptionSaved: number;
+}
+
+export interface ModelRoute {
+  model: string;
+  engine: EngineKind;
+  subscriptionCovered: boolean;
+  source: ModelRouteSource;
 }
