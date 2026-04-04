@@ -32,7 +32,8 @@ sentinel-bridge/
 ├── LICENSE
 ├── docs/
 │   ├── TECHNICAL-ARCHITECTURE.md
-│   └── API-REFERENCE.md
+│   ├── API-REFERENCE.md
+│   └── CONTEXT-HANDOFF.md   # onboarding + parallel-branch notes for agents
 ├── src/
 │   ├── index.ts              # Plugin entry point (register tools + services)
 │   ├── types.ts              # Shared types, interfaces, pricing
@@ -44,7 +45,7 @@ sentinel-bridge/
 │   │   ├── codex.ts          # CodexEngine implementation
 │   │   └── grok.ts           # GrokEngine implementation
 │   └── __tests__/
-│       ├── session-manager.test.ts
+│       ├── session-manager.test.ts   # routing + start fallback (mocked engines)
 │       ├── claude-engine.test.ts
 │       ├── codex-engine.test.ts
 │       ├── grok-engine.test.ts

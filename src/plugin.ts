@@ -44,6 +44,11 @@ export interface SentinelBridgeConfig {
   defaultEngine?: 'claude' | 'codex' | 'grok';
   /** Default model ref, e.g. "claude/opus-4.6" */
   defaultModel?: string;
+  /**
+   * Engines to try in order after the primary when `start` fails (e.g. CLI missing).
+   * Set to `[]` to disable. Default: claude → codex → grok.
+   */
+  defaultFallbackChain?: Array<'claude' | 'codex' | 'grok'>;
   /** Max concurrent sessions across all engines */
   maxConcurrentSessions?: number;
   /** Session TTL in milliseconds (default: 7 days) */
@@ -74,6 +79,7 @@ export const DEFAULT_CONFIG: SentinelBridgeConfig = {
   },
   defaultEngine: 'claude',
   defaultModel: 'claude/claude-opus-4-6',
+  defaultFallbackChain: ['claude', 'codex', 'grok'],
   maxConcurrentSessions: 5,
   sessionTTLMs: 7 * 24 * 60 * 60 * 1000, // 7 days
 };

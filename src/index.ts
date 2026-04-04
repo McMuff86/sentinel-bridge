@@ -101,7 +101,9 @@ function buildTools(): ToolDef[] {
     {
       name: 'sb_session_start',
       description:
-        'Start a new engine session. Returns a session handle for follow-up messages.',
+        'Start a new engine session. Returns a session handle for follow-up messages. ' +
+        'If the primary engine fails to start, the plugin retries along config.defaultFallbackChain ' +
+        '(default: claude → codex → grok); use an empty chain to disable.',
       parameters: {
         type: 'object',
         properties: {
@@ -569,6 +571,7 @@ function toSessionManagerConfig(
     maxConcurrentSessions: config.maxConcurrentSessions,
     defaultEngine: config.defaultEngine,
     defaultModel: config.defaultModel,
+    defaultFallbackChain: config.defaultFallbackChain,
     claude: normalizeEngineConfig(config.engines?.claude),
     codex: normalizeEngineConfig(config.engines?.codex),
     grok: normalizeEngineConfig(config.engines?.grok),
