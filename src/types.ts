@@ -123,10 +123,20 @@ export interface SessionInfo extends ISession {
   routingTrace?: RoutingTrace;
 }
 
+export interface TurnUsage {
+  tokensIn: number;
+  tokensOut: number;
+  cachedTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  durationMs: number;
+}
+
 export interface SendMessageResult {
   name: string;
   output: string;
   session: SessionInfo;
+  turnUsage: TurnUsage;
 }
 
 export interface EngineCostBreakdown {

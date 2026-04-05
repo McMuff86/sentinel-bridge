@@ -10,6 +10,9 @@ const hoisted = vi.hoisted(() => {
     tokenCount: { input: 0, output: 0, cachedInput: 0, total: 0 },
   };
 
+  // Shared mutable ref so tests can override the usage returned by status()
+  const claudeUsageRef = { current: idleUsage };
+
   class MockClaudeEngine {
     start = claudeStart;
     send = vi.fn();
@@ -19,7 +22,7 @@ const hoisted = vi.hoisted(() => {
       state: 'running' as const,
       sessionId: null,
       model: 'claude-opus-4-6',
-      usage: idleUsage,
+      usage: claudeUsageRef.current,
     });
     getSessionId = () => null;
   }
@@ -56,6 +59,8 @@ const hoisted = vi.hoisted(() => {
     claudeStart,
     codexStart,
     grokStart,
+    claudeUsageRef,
+    idleUsage,
     MockClaudeEngine,
     MockCodexEngine,
     MockGrokEngine,
@@ -86,6 +91,7 @@ describe('SessionManager', () => {
     claudeStart.mockResolvedValue(undefined);
     codexStart.mockResolvedValue(undefined);
     grokStart.mockResolvedValue(undefined);
+    hoisted.claudeUsageRef.current = hoisted.idleUsage;
   });
 
   describe('resolveModelRoute', () => {
@@ -172,6 +178,56 @@ describe('SessionManager', () => {
       await expect(
         manager.startSession({ name: 'gamma', model: 'opus' }),
       ).rejects.toThrow(/grok unavailable/);
+    });
+
+    it('should compute per-turn usage deltas in sendMessage', async () => {
+      const usageAfterSend1 = { costUsd: 0.10, tokenCount: { input: 100, output: 50, cachedInput: 10, total: 160 } };
+      const usageAfterSend2 = { costUsd: 0.25, tokenCount: { input: 250, output: 120, cachedInput: 30, total: 400 } };
+
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'turn-test' });
+
+      // Get the engine instance's send mock to update usage on call
+      const record = (manager as any).sessions.get('turn-test');
+      record.engineInstance.send = vi.fn()
+        .mockImplementationOnce(async () => {
+          hoisted.claudeUsageRef.current = usageAfterSend1;
+          return 'response-1';
+        })
+        .mockImplementationOnce(async () => {
+          hoisted.claudeUsageRef.current = usageAfterSend2;
+          return 'response-2';
+        });
+
+      const result1 = await manager.sendMessage('turn-test', 'hello');
+      expect(result1.turnUsage).toEqual({
+        tokensIn: 100,
+        tokensOut: 50,
+        cachedTokens: 10,
+        totalTokens: 160,
+        costUsd: 0.1,
+        durationMs: expect.any(Number),
+      });
+
+      const result2 = await manager.sendMessage('turn-test', 'again');
+      expect(result2.turnUsage).toEqual({
+        tokensIn: 150,
+        tokensOut: 70,
+        cachedTokens: 20,
+        totalTokens: 240,
+        costUsd: 0.15,
+        durationMs: expect.any(Number),
+      });
+
+      // Session totals should reflect the accumulated values
+      expect(result2.session.costUsd).toBe(0.25);
+      expect(result2.session.tokenCount.input).toBe(250);
+
+      // Restore default usage
+      hoisted.claudeUsageRef.current = hoisted.idleUsage;
     });
 
     it('should prefer a resume-capable engine when resuming without explicit model or engine', async () => {

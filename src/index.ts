@@ -30,6 +30,7 @@ export type {
   SendMessageResult,
   SessionInfo,
   SessionOverview,
+  TurnUsage,
 } from './types.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok';
@@ -484,6 +485,14 @@ function serializeTurnResult(result: {
   session: ReturnType<SessionManager['getSessionStatus']> extends infer T
     ? Exclude<T, undefined>
     : never;
+  turnUsage?: {
+    tokensIn: number;
+    tokensOut: number;
+    cachedTokens: number;
+    totalTokens: number;
+    costUsd: number;
+    durationMs: number;
+  };
 }): ToolHandlerResponse {
   return {
     ok: true,
@@ -493,10 +502,23 @@ function serializeTurnResult(result: {
     session: serializeSession(result.session),
     routing: summarizeRoutingTrace(result.session.routingTrace),
     stats: {
-      tokensIn: result.session.tokenCount.input,
-      tokensOut: result.session.tokenCount.output,
-      cachedTokens: result.session.tokenCount.cachedInput,
-      costUsd: result.session.costUsd,
+      turn: result.turnUsage
+        ? { ...result.turnUsage }
+        : {
+            tokensIn: 0,
+            tokensOut: 0,
+            cachedTokens: 0,
+            totalTokens: 0,
+            costUsd: 0,
+            durationMs: 0,
+          },
+      session: {
+        tokensIn: result.session.tokenCount.input,
+        tokensOut: result.session.tokenCount.output,
+        cachedTokens: result.session.tokenCount.cachedInput,
+        totalTokens: result.session.tokenCount.total,
+        costUsd: result.session.costUsd,
+      },
     },
   };
 }

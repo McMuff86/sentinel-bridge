@@ -37,6 +37,7 @@ import type {
   SessionOverview,
   SessionStartOptions,
   TokenUsage,
+  TurnUsage,
 } from './types.js';
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -128,12 +129,32 @@ export class SessionManager {
   }
 
   async sendMessage(name: string, message: string): Promise<SendMessageResult> {
+    const record = this.requireSession(name);
+    const prevCost = record.session.costUsd;
+    const prevTokens = { ...record.session.tokenCount };
+    const startMs = Date.now();
+
     const output = await this.send(name, message);
+
+    const session = this.requireSessionInfo(name);
+    const durationMs = Date.now() - startMs;
+
+    const tokensIn = Math.max(0, session.tokenCount.input - prevTokens.input);
+    const tokensOut = Math.max(0, session.tokenCount.output - prevTokens.output);
+    const cachedTokens = Math.max(0, session.tokenCount.cachedInput - prevTokens.cachedInput);
 
     return {
       name,
       output,
-      session: this.requireSessionInfo(name),
+      session,
+      turnUsage: {
+        tokensIn,
+        tokensOut,
+        cachedTokens,
+        totalTokens: tokensIn + tokensOut + cachedTokens,
+        costUsd: roundUsd(Math.max(0, session.costUsd - prevCost)),
+        durationMs,
+      },
     };
   }
 
@@ -281,16 +302,34 @@ export class SessionManager {
     this.cleanupExpiredSessions();
 
     const record = this.requireSession(name);
+    const prevCost = record.session.costUsd;
+    const prevTokens = { ...record.session.tokenCount };
+    const startMs = Date.now();
 
     try {
       const output = await record.engineInstance.compact(summary);
       record.lastTouchedAt = Date.now();
       syncSession(record);
 
+      const session = this.requireSessionInfo(name);
+      const durationMs = Date.now() - startMs;
+
+      const tokensIn = Math.max(0, session.tokenCount.input - prevTokens.input);
+      const tokensOut = Math.max(0, session.tokenCount.output - prevTokens.output);
+      const cachedTokens = Math.max(0, session.tokenCount.cachedInput - prevTokens.cachedInput);
+
       return {
         name,
         output,
-        session: this.requireSessionInfo(name),
+        session,
+        turnUsage: {
+          tokensIn,
+          tokensOut,
+          cachedTokens,
+          totalTokens: tokensIn + tokensOut + cachedTokens,
+          costUsd: roundUsd(Math.max(0, session.costUsd - prevCost)),
+          durationMs,
+        },
       };
     } catch (error) {
       record.lastTouchedAt = Date.now();
