@@ -252,6 +252,93 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('event timeline', () => {
+    it('should emit session_started on successful start', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      const spy = vi.spyOn(manager.events, 'appendEvent').mockImplementation(() => {});
+      await manager.startSession({ name: 'ev-start' });
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'session_started', sessionName: 'ev-start', engine: 'claude' }),
+      );
+      spy.mockRestore();
+    });
+
+    it('should emit message_sent and message_completed on send', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'ev-send' });
+      const record = (manager as any).sessions.get('ev-send');
+      record.engineInstance.send = vi.fn().mockResolvedValue('ok');
+
+      const spy = vi.spyOn(manager.events, 'appendEvent').mockImplementation(() => {});
+      await manager.sendMessage('ev-send', 'hello');
+
+      const types = spy.mock.calls.map((c) => (c[0] as any).type);
+      expect(types).toContain('message_sent');
+      expect(types).toContain('message_completed');
+      spy.mockRestore();
+    });
+
+    it('should emit message_failed when send throws', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'ev-fail' });
+      const record = (manager as any).sessions.get('ev-fail');
+      record.engineInstance.send = vi.fn().mockRejectedValue(new Error('boom'));
+
+      const spy = vi.spyOn(manager.events, 'appendEvent').mockImplementation(() => {});
+      await expect(manager.sendMessage('ev-fail', 'hello')).rejects.toThrow();
+
+      const types = spy.mock.calls.map((c) => (c[0] as any).type);
+      expect(types).toContain('message_sent');
+      expect(types).toContain('message_failed');
+      expect(types).not.toContain('message_completed');
+      spy.mockRestore();
+    });
+
+    it('should emit session_stopped on stop', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'ev-stop' });
+
+      const spy = vi.spyOn(manager.events, 'appendEvent').mockImplementation(() => {});
+      await manager.stopSession('ev-stop');
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'session_stopped', sessionName: 'ev-stop' }),
+      );
+      spy.mockRestore();
+    });
+
+    it('should emit compact_started and compact_completed on compact', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'ev-compact' });
+      const record = (manager as any).sessions.get('ev-compact');
+      record.engineInstance.compact = vi.fn().mockResolvedValue('compacted');
+
+      const spy = vi.spyOn(manager.events, 'appendEvent').mockImplementation(() => {});
+      await manager.compactSession('ev-compact');
+
+      const types = spy.mock.calls.map((c) => (c[0] as any).type);
+      expect(types).toContain('compact_started');
+      expect(types).toContain('compact_completed');
+      spy.mockRestore();
+    });
+  });
+
   describe('activity fields', () => {
     it('should track phase, lastAction, and previews through the session lifecycle', async () => {
       const manager = new SessionManager({

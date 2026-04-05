@@ -35,6 +35,8 @@ export type {
   SessionPhase,
   TurnUsage,
 } from './types.js';
+export type { SessionEvent, SessionEventType } from './sessions/session-events.js';
+export { SessionEventStore } from './sessions/session-events.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok';
 
@@ -348,6 +350,34 @@ function buildTools(): ToolDef[] {
         return {
           ...serializeTurnResult(result),
           compacted: result.name,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_session_events',
+      description: 'Return the last N events from the session event timeline.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Session name' },
+          limit: {
+            type: 'number',
+            description: 'Max events to return (default 20)',
+          },
+        },
+        required: ['name'],
+      },
+      handler: async (params, ctx) => {
+        const name = readRequiredString(params, 'name');
+        const limit =
+          typeof params['limit'] === 'number' ? params['limit'] : 20;
+        const events = ctx.manager.events.listEvents(name, limit);
+
+        return {
+          ok: true,
+          name,
+          count: events.length,
+          events,
         } satisfies ToolHandlerResponse;
       },
     },

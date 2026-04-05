@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { activate, PLUGIN_META } from '../index.js';
 
 describe('activate', () => {
-  it('registers all 11 tools', () => {
+  it('registers all 12 tools', () => {
     const registered: string[] = [];
     const mockApi = {
       registerTool: vi.fn((tool: { name: string }) => {
@@ -14,7 +14,7 @@ describe('activate', () => {
 
     activate(mockApi);
 
-    expect(registered).toHaveLength(11);
+    expect(registered).toHaveLength(12);
     expect(registered).toContain('sb_session_start');
     expect(registered).toContain('sb_session_send');
     expect(registered).toContain('sb_session_stop');
@@ -26,6 +26,7 @@ describe('activate', () => {
     expect(registered).toContain('sb_model_route');
     expect(registered).toContain('sb_cost_report');
     expect(registered).toContain('sb_compact');
+    expect(registered).toContain('sb_session_events');
   });
 
   it('registers claude and codex CLI backends', () => {

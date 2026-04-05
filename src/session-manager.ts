@@ -23,6 +23,8 @@ import {
   syncSession,
   toSessionInfo,
 } from './sessions/session-info.js';
+import { SessionEventStore } from './sessions/session-events.js';
+import type { SessionEvent } from './sessions/session-events.js';
 import { SessionStore } from './sessions/session-store.js';
 import type { SessionRecord } from './sessions/types.js';
 import type {
@@ -48,6 +50,7 @@ export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly config: SentinelBridgeConfig;
   private readonly store = new SessionStore();
+  readonly events = new SessionEventStore();
   private cleanupTimer: {
     unref?: () => void;
   } | null = null;
@@ -109,6 +112,7 @@ export class SessionManager {
 
         const info = this.requireSessionInfo(options.name);
         this.store.upsert(info);
+        this.emit('session_started', options.name, engine);
         return info;
       } catch (error) {
         appendRoutingAttempt(
@@ -136,8 +140,17 @@ export class SessionManager {
 
     record.phase = 'sending';
     record.updatedAt = startMs;
+    this.emit('message_sent', name, record.session.engine, { preview: truncatePreview(message) ?? undefined });
 
-    const output = await this.send(name, message);
+    let output: string;
+    try {
+      output = await this.send(name, message);
+    } catch (error) {
+      this.emit('message_failed', name, record.session.engine, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
 
     const now = Date.now();
     record.phase = 'idle';
@@ -145,6 +158,7 @@ export class SessionManager {
     record.updatedAt = now;
     record.lastPromptPreview = truncatePreview(message);
     record.lastResponsePreview = truncatePreview(output);
+    this.emit('message_completed', name, record.session.engine);
 
     const session = this.requireSessionInfo(name);
     const durationMs = now - startMs;
@@ -318,6 +332,7 @@ export class SessionManager {
 
     record.phase = 'compacting';
     record.updatedAt = startMs;
+    this.emit('compact_started', name, record.session.engine);
 
     try {
       const output = await record.engineInstance.compact(summary);
@@ -327,6 +342,7 @@ export class SessionManager {
       record.lastAction = 'compact';
       record.updatedAt = now;
       record.lastResponsePreview = truncatePreview(output);
+      this.emit('compact_completed', name, record.session.engine);
       syncSession(record);
 
       const session = this.requireSessionInfo(name);
@@ -481,6 +497,7 @@ export class SessionManager {
       syncSession(record);
       this.sessions.delete(name);
       this.store.delete(name);
+      this.emit('session_stopped', name, record.session.engine);
     } catch (error) {
       record.lastTouchedAt = Date.now();
       record.phase = 'idle';
@@ -642,6 +659,7 @@ export class SessionManager {
 
     syncSession(record);
     this.sessions.set(session.name, record);
+    this.emit('session_rehydrated', session.name, session.engine);
     return record;
   }
 
@@ -686,6 +704,21 @@ export class SessionManager {
     }
 
     return date;
+  }
+
+  private emit(
+    type: SessionEvent['type'],
+    name: string,
+    engine: EngineKind,
+    extra?: { preview?: string; error?: string },
+  ): void {
+    this.events.appendEvent({
+      ts: new Date().toISOString(),
+      type,
+      engine,
+      sessionName: name,
+      ...extra,
+    });
   }
 
   private wrapSessionError(
