@@ -15,6 +15,7 @@ import {
   resolveDefaultRoute,
   resolveModelRoute,
 } from './routing/resolve-model-route.js';
+import { selectPrimaryEngine } from './routing/select-engine.js';
 import { cleanupExpiredSessions } from './sessions/session-cleanup.js';
 import {
   cloneSession,
@@ -66,10 +67,15 @@ export class SessionManager {
   }
 
   async startSession(options: SessionStartOptions): Promise<SessionInfo> {
-    const primaryRoute = options.model
+    const routedPrimary = options.model
       ? this.resolveModelRoute(options.model, options.engine)
-      : this.resolveDefaultRoute(options.engine);
-    const primaryEngine = options.engine ?? primaryRoute.engine;
+      : undefined;
+    const primaryEngine = selectPrimaryEngine(
+      this.config,
+      options,
+      routedPrimary?.engine,
+    );
+    const primaryRoute = routedPrimary ?? this.resolveDefaultRoute(primaryEngine);
     const enginesToTry = expandFallbackChain(this.config, primaryEngine);
 
     const routingTrace = createRoutingTrace({

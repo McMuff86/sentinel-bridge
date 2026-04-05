@@ -238,6 +238,16 @@ Session starts now capture a minimal routing trace that records:
 
 This trace is exposed through session status/info payloads and is meant as the first observability seam for future policy work.
 
+## Capability-based routing (light)
+
+A minimal capability layer now exists for primary-engine selection when the caller does **not** explicitly choose an engine or model:
+
+- if `resumeSessionId` is present, prefer an engine that supports resume
+- if `cwd` is present, prefer an engine that supports working-directory state
+- otherwise fall back to the configured default engine
+
+This logic intentionally stays small and conservative. It is a seed for future policy expansion, not a full scoring system.
+
 ## OpenClaw Plugin Integration
 
 sentinel-bridge registers as an OpenClaw plugin. The **authoritative manifest** is the repo root **`openclaw.plugin.json`** (entry `main`: `./dist/index.js`, export `activate` from `src/index.ts`). Tool names and config schema there should match `buildTools()` and `src/plugin.ts`.

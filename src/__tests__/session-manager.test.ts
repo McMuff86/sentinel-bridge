@@ -173,5 +173,26 @@ describe('SessionManager', () => {
         manager.startSession({ name: 'gamma', model: 'opus' }),
       ).rejects.toThrow(/grok unavailable/);
     });
+
+    it('should prefer a resume-capable engine when resuming without explicit model or engine', async () => {
+      const manager = new SessionManager({
+        defaultEngine: 'codex',
+        defaultFallbackChain: ['codex', 'claude', 'grok'],
+        claude: { model: 'claude-opus-4-6' },
+        codex: { model: 'gpt-5.4' },
+      });
+
+      await manager.startSession({
+        name: 'resume-test',
+        resumeSessionId: 'abc123',
+      });
+
+      expect(claudeStart).toHaveBeenCalledTimes(1);
+      expect(codexStart).not.toHaveBeenCalled();
+
+      const session = manager.getSessionStatus('resume-test');
+      expect(session?.engine).toBe('claude');
+      expect(session?.routingTrace?.primary.engine).toBe('claude');
+    });
   });
 });
