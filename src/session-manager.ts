@@ -1,6 +1,4 @@
-import { ClaudeEngine } from './engines/claude-engine.js';
-import { CodexEngine } from './engines/codex-engine.js';
-import { GrokEngine } from './engines/grok-engine.js';
+import { createEngine } from './engines/create-engine.js';
 import {
   emptyTokenUsage,
   mergeEngineConfig,
@@ -291,7 +289,7 @@ export class SessionManager {
     this.enforceConcurrentSessionLimit();
 
     const resolvedConfig = this.resolveEngineConfig(engine, config);
-    const engineInstance = this.createEngine(engine, resolvedConfig);
+    const engineInstance = createEngine(engine, resolvedConfig);
 
     try {
       await engineInstance.start();
@@ -466,21 +464,6 @@ export class SessionManager {
         return this.config.codex ?? {};
       case 'grok':
         return this.config.grok ?? {};
-      default: {
-        const exhaustiveCheck: never = engine;
-        throw new Error(`Unsupported engine: ${exhaustiveCheck}`);
-      }
-    }
-  }
-
-  private createEngine(engine: EngineKind, config: EngineConfig): IEngine {
-    switch (engine) {
-      case 'claude':
-        return new ClaudeEngine(config);
-      case 'codex':
-        return new CodexEngine(config);
-      case 'grok':
-        return new GrokEngine(config);
       default: {
         const exhaustiveCheck: never = engine;
         throw new Error(`Unsupported engine: ${exhaustiveCheck}`);
