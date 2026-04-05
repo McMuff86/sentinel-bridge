@@ -23,6 +23,14 @@ type PersistedSessionRecord = {
   lastTouchedAt: string;
   lastError?: string;
   routingTrace?: SessionInfo['routingTrace'];
+  activity?: {
+    phase: string;
+    lastAction: string;
+    updatedAt: string;
+    lastPromptPreview: string | null;
+    lastResponsePreview: string | null;
+    isRehydrated: boolean;
+  };
 };
 
 type SessionStoreData = {
@@ -77,6 +85,14 @@ export class SessionStore {
       lastTouchedAt: session.lastTouchedAt.toISOString(),
       lastError: session.lastError,
       routingTrace: session.routingTrace,
+      activity: {
+        phase: session.activity.phase,
+        lastAction: session.activity.lastAction,
+        updatedAt: session.activity.updatedAt.toISOString(),
+        lastPromptPreview: session.activity.lastPromptPreview,
+        lastResponsePreview: session.activity.lastResponsePreview,
+        isRehydrated: session.activity.isRehydrated,
+      },
     };
     this.save(data);
   }
@@ -84,22 +100,7 @@ export class SessionStore {
   get(name: string): SessionInfo | undefined {
     const item = this.load().sessions[name];
     if (!item) return undefined;
-    return {
-      id: item.id,
-      name: item.name,
-      engine: item.engine,
-      model: item.model,
-      status: item.status as SessionInfo['status'],
-      createdAt: new Date(item.createdAt),
-      costUsd: item.costUsd,
-      tokenCount: { ...item.tokenCount },
-      cwd: item.cwd,
-      engineState: item.engineState as SessionInfo['engineState'],
-      engineSessionId: item.engineSessionId,
-      lastTouchedAt: new Date(item.lastTouchedAt),
-      lastError: item.lastError,
-      routingTrace: item.routingTrace,
-    };
+    return toSessionInfoFromPersisted(item);
   }
 
   delete(name: string): void {
@@ -110,25 +111,48 @@ export class SessionStore {
   }
 
   list(): SessionInfo[] {
-    return Object.values(this.load().sessions).map((item) => ({
-      id: item.id,
-      name: item.name,
-      engine: item.engine,
-      model: item.model,
-      status: item.status as SessionInfo['status'],
-      createdAt: new Date(item.createdAt),
-      costUsd: item.costUsd,
-      tokenCount: { ...item.tokenCount },
-      cwd: item.cwd,
-      engineState: item.engineState as SessionInfo['engineState'],
-      engineSessionId: item.engineSessionId,
-      lastTouchedAt: new Date(item.lastTouchedAt),
-      lastError: item.lastError,
-      routingTrace: item.routingTrace,
-    }));
+    return Object.values(this.load().sessions).map(toSessionInfoFromPersisted);
   }
 
   clear(): void {
     rmSync(this.path, { force: true });
   }
+}
+
+function toSessionInfoFromPersisted(item: PersistedSessionRecord): SessionInfo {
+  const lastTouchedAt = new Date(item.lastTouchedAt);
+
+  return {
+    id: item.id,
+    name: item.name,
+    engine: item.engine,
+    model: item.model,
+    status: item.status as SessionInfo['status'],
+    createdAt: new Date(item.createdAt),
+    costUsd: item.costUsd,
+    tokenCount: { ...item.tokenCount },
+    cwd: item.cwd,
+    engineState: item.engineState as SessionInfo['engineState'],
+    engineSessionId: item.engineSessionId,
+    lastTouchedAt,
+    lastError: item.lastError,
+    routingTrace: item.routingTrace,
+    activity: item.activity
+      ? {
+          phase: item.activity.phase as SessionInfo['activity']['phase'],
+          lastAction: item.activity.lastAction as SessionInfo['activity']['lastAction'],
+          updatedAt: new Date(item.activity.updatedAt),
+          lastPromptPreview: item.activity.lastPromptPreview,
+          lastResponsePreview: item.activity.lastResponsePreview,
+          isRehydrated: item.activity.isRehydrated,
+        }
+      : {
+          phase: 'stopped',
+          lastAction: 'stop',
+          updatedAt: lastTouchedAt,
+          lastPromptPreview: null,
+          lastResponsePreview: null,
+          isRehydrated: false,
+        },
+  };
 }

@@ -134,10 +134,20 @@ export class SessionManager {
     const prevTokens = { ...record.session.tokenCount };
     const startMs = Date.now();
 
+    record.phase = 'sending';
+    record.updatedAt = startMs;
+
     const output = await this.send(name, message);
 
+    const now = Date.now();
+    record.phase = 'idle';
+    record.lastAction = 'send';
+    record.updatedAt = now;
+    record.lastPromptPreview = truncatePreview(message);
+    record.lastResponsePreview = truncatePreview(output);
+
     const session = this.requireSessionInfo(name);
-    const durationMs = Date.now() - startMs;
+    const durationMs = now - startMs;
 
     const tokensIn = Math.max(0, session.tokenCount.input - prevTokens.input);
     const tokensOut = Math.max(0, session.tokenCount.output - prevTokens.output);
@@ -306,13 +316,21 @@ export class SessionManager {
     const prevTokens = { ...record.session.tokenCount };
     const startMs = Date.now();
 
+    record.phase = 'compacting';
+    record.updatedAt = startMs;
+
     try {
       const output = await record.engineInstance.compact(summary);
-      record.lastTouchedAt = Date.now();
+      const now = Date.now();
+      record.lastTouchedAt = now;
+      record.phase = 'idle';
+      record.lastAction = 'compact';
+      record.updatedAt = now;
+      record.lastResponsePreview = truncatePreview(output);
       syncSession(record);
 
       const session = this.requireSessionInfo(name);
-      const durationMs = Date.now() - startMs;
+      const durationMs = now - startMs;
 
       const tokensIn = Math.max(0, session.tokenCount.input - prevTokens.input);
       const tokensOut = Math.max(0, session.tokenCount.output - prevTokens.output);
@@ -333,6 +351,8 @@ export class SessionManager {
       };
     } catch (error) {
       record.lastTouchedAt = Date.now();
+      record.phase = 'idle';
+      record.updatedAt = Date.now();
       syncSession(record);
       throw this.wrapSessionError('compact', name, record.session.engine, error);
     }
@@ -395,6 +415,12 @@ export class SessionManager {
       session,
       config: resolvedConfig,
       lastTouchedAt: now,
+      phase: 'idle',
+      lastAction: 'start',
+      updatedAt: now,
+      lastPromptPreview: null,
+      lastResponsePreview: null,
+      isRehydrated: false,
     };
 
     syncSession(record);
@@ -442,14 +468,23 @@ export class SessionManager {
       return;
     }
 
+    record.phase = 'stopping';
+    record.updatedAt = Date.now();
+
     try {
       await record.engineInstance.stop();
-      record.lastTouchedAt = Date.now();
+      const now = Date.now();
+      record.lastTouchedAt = now;
+      record.phase = 'stopped';
+      record.lastAction = 'stop';
+      record.updatedAt = now;
       syncSession(record);
       this.sessions.delete(name);
       this.store.delete(name);
     } catch (error) {
       record.lastTouchedAt = Date.now();
+      record.phase = 'idle';
+      record.updatedAt = Date.now();
       syncSession(record);
       this.store.upsert(this.requireSessionInfo(name));
       throw this.wrapSessionError('stop', name, record.session.engine, error);
@@ -582,6 +617,7 @@ export class SessionManager {
       throw this.wrapSessionError('rehydrate', session.name, session.engine, error);
     }
 
+    const now = Date.now();
     const record: SessionRecord = {
       engineInstance,
       session: {
@@ -596,6 +632,12 @@ export class SessionManager {
       config: resolvedConfig,
       lastTouchedAt: session.lastTouchedAt.getTime(),
       routingTrace: session.routingTrace,
+      phase: 'idle',
+      lastAction: 'rehydrate',
+      updatedAt: now,
+      lastPromptPreview: session.activity.lastPromptPreview,
+      lastResponsePreview: session.activity.lastResponsePreview,
+      isRehydrated: true,
     };
 
     syncSession(record);
@@ -659,4 +701,13 @@ export class SessionManager {
     );
   }
 
+}
+
+const PREVIEW_MAX_LENGTH = 120;
+
+function truncatePreview(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= PREVIEW_MAX_LENGTH) return trimmed;
+  return trimmed.slice(0, PREVIEW_MAX_LENGTH) + '…';
 }

@@ -56,6 +56,14 @@ export function toSessionInfo(
     lastTouchedAt: new Date(record.lastTouchedAt),
     lastError: status.usage.lastError,
     routingTrace: record.routingTrace,
+    activity: {
+      phase: record.phase,
+      lastAction: record.lastAction,
+      updatedAt: new Date(record.updatedAt),
+      lastPromptPreview: record.lastPromptPreview,
+      lastResponsePreview: record.lastResponsePreview,
+      isRehydrated: record.isRehydrated,
+    },
   };
 }
 

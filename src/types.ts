@@ -8,6 +8,16 @@ export type EngineState =
 
 export type SessionStatus = 'active' | 'stopped' | 'expired' | 'error';
 
+export type SessionPhase =
+  | 'starting'
+  | 'idle'
+  | 'sending'
+  | 'compacting'
+  | 'stopping'
+  | 'stopped';
+
+export type SessionAction = 'start' | 'send' | 'compact' | 'stop' | 'rehydrate';
+
 export type EngineKind = 'claude' | 'codex' | 'grok';
 
 export type ModelRouteSource = 'explicit' | 'alias' | 'default';
@@ -113,6 +123,15 @@ export interface RoutingTrace {
   selectedModel?: string;
 }
 
+export interface SessionActivity {
+  phase: SessionPhase;
+  lastAction: SessionAction;
+  updatedAt: Date;
+  lastPromptPreview: string | null;
+  lastResponsePreview: string | null;
+  isRehydrated: boolean;
+}
+
 export interface SessionInfo extends ISession {
   name: string;
   cwd: string | null;
@@ -121,6 +140,7 @@ export interface SessionInfo extends ISession {
   lastTouchedAt: Date;
   lastError?: string;
   routingTrace?: RoutingTrace;
+  activity: SessionActivity;
 }
 
 export interface TurnUsage {

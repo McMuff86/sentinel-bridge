@@ -3,6 +3,8 @@ import type {
   IEngine,
   ISession,
   RoutingTrace,
+  SessionAction,
+  SessionPhase,
 } from '../types.js';
 
 export interface SessionRecord {
@@ -11,4 +13,10 @@ export interface SessionRecord {
   config: EngineConfig;
   lastTouchedAt: number;
   routingTrace?: RoutingTrace;
+  phase: SessionPhase;
+  lastAction: SessionAction;
+  updatedAt: number;
+  lastPromptPreview: string | null;
+  lastResponsePreview: string | null;
+  isRehydrated: boolean;
 }

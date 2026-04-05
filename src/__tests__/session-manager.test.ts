@@ -251,4 +251,39 @@ describe('SessionManager', () => {
       expect(session?.routingTrace?.primary.engine).toBe('claude');
     });
   });
+
+  describe('activity fields', () => {
+    it('should track phase, lastAction, and previews through the session lifecycle', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      // After start: phase=idle, lastAction=start
+      await manager.startSession({ name: 'activity-test' });
+      const afterStart = manager.getSessionStatus('activity-test')!;
+      expect(afterStart.activity.phase).toBe('idle');
+      expect(afterStart.activity.lastAction).toBe('start');
+      expect(afterStart.activity.isRehydrated).toBe(false);
+      expect(afterStart.activity.lastPromptPreview).toBeNull();
+      expect(afterStart.activity.lastResponsePreview).toBeNull();
+      expect(afterStart.activity.updatedAt).toBeInstanceOf(Date);
+
+      // After send: phase=idle, lastAction=send, previews populated
+      const record = (manager as any).sessions.get('activity-test');
+      record.engineInstance.send = vi.fn().mockResolvedValue('engine reply here');
+
+      const sendResult = await manager.sendMessage('activity-test', 'hello world');
+      expect(sendResult.session.activity.phase).toBe('idle');
+      expect(sendResult.session.activity.lastAction).toBe('send');
+      expect(sendResult.session.activity.lastPromptPreview).toBe('hello world');
+      expect(sendResult.session.activity.lastResponsePreview).toBe('engine reply here');
+
+      // Preview truncation at 120 chars
+      const longMessage = 'x'.repeat(200);
+      record.engineInstance.send = vi.fn().mockResolvedValue('y'.repeat(200));
+      const longResult = await manager.sendMessage('activity-test', longMessage);
+      expect(longResult.session.activity.lastPromptPreview).toBe('x'.repeat(120) + '…');
+      expect(longResult.session.activity.lastResponsePreview).toBe('y'.repeat(120) + '…');
+    });
+  });
 });

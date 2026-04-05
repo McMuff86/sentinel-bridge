@@ -28,8 +28,11 @@ export type {
   ModelPricing,
   ModelRoute,
   SendMessageResult,
+  SessionAction,
+  SessionActivity,
   SessionInfo,
   SessionOverview,
+  SessionPhase,
   TurnUsage,
 } from './types.js';
 
@@ -556,6 +559,14 @@ function serializeSession(session: {
     selectedEngine?: EngineKind;
     selectedModel?: string;
   };
+  activity: {
+    phase: string;
+    lastAction: string;
+    updatedAt: Date;
+    lastPromptPreview: string | null;
+    lastResponsePreview: string | null;
+    isRehydrated: boolean;
+  };
 }): Record<string, unknown> {
   return {
     id: session.id,
@@ -584,6 +595,14 @@ function serializeSession(session: {
       : undefined,
     routing: summarizeRoutingTrace(session.routingTrace),
     subscriptionCovered: session.engine === 'claude',
+    activity: {
+      phase: session.activity.phase,
+      lastAction: session.activity.lastAction,
+      updatedAt: session.activity.updatedAt.toISOString(),
+      lastPromptPreview: session.activity.lastPromptPreview,
+      lastResponsePreview: session.activity.lastResponsePreview,
+      isRehydrated: session.activity.isRehydrated,
+    },
   };
 }
 
