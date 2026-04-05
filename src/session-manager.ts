@@ -10,12 +10,19 @@ import {
   resolveDefaultRoute,
   resolveModelRoute,
 } from './routing/resolve-model-route.js';
+import { cleanupExpiredSessions } from './sessions/session-cleanup.js';
+import {
+  cloneSession,
+  createEmptyBreakdownMap,
+  syncSession,
+  toSessionInfo,
+} from './sessions/session-info.js';
+import type { SessionRecord } from './sessions/types.js';
 import type {
   CostReport,
   EngineConfig,
   EngineCostBreakdown,
   EngineKind,
-  IEngine,
   ISession,
   SentinelBridgeConfig,
   SendMessageResult,
@@ -24,13 +31,6 @@ import type {
   SessionStartOptions,
   TokenUsage,
 } from './types.js';
-
-interface SessionRecord {
-  engineInstance: IEngine;
-  session: ISession;
-  config: EngineConfig;
-  lastTouchedAt: number;
-}
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -113,8 +113,8 @@ export class SessionManager {
     this.cleanupExpiredSessions();
 
     return Array.from(this.sessions.entries()).map(([name, record]) => {
-      this.syncSession(record);
-      return this.toSessionInfo(name, record);
+      syncSession(record);
+      return toSessionInfo(name, record);
     });
   }
 
@@ -126,13 +126,13 @@ export class SessionManager {
       return undefined;
     }
 
-    this.syncSession(record);
-    return this.toSessionInfo(name, record);
+    syncSession(record);
+    return toSessionInfo(name, record);
   }
 
   getOverview(): SessionOverview {
     const sessions = this.listSessions();
-    const byEngine = this.createEmptyBreakdownMap();
+    const byEngine = createEmptyBreakdownMap();
     let activeSessions = 0;
     let stoppedSessions = 0;
     let expiredSessions = 0;
@@ -189,7 +189,7 @@ export class SessionManager {
     this.cleanupExpiredSessions();
 
     const sinceDate = since ? this.parseSinceDate(since) : null;
-    const byEngine = this.createEmptyBreakdownMap();
+    const byEngine = createEmptyBreakdownMap();
 
     for (const session of this.listSessions()) {
       if (sinceDate && session.createdAt < sinceDate) {
@@ -245,7 +245,7 @@ export class SessionManager {
     try {
       const output = await record.engineInstance.compact(summary);
       record.lastTouchedAt = Date.now();
-      this.syncSession(record);
+      syncSession(record);
 
       return {
         name,
@@ -254,7 +254,7 @@ export class SessionManager {
       };
     } catch (error) {
       record.lastTouchedAt = Date.now();
-      this.syncSession(record);
+      syncSession(record);
       throw this.wrapSessionError('compact', name, record.session.engine, error);
     }
   }
@@ -318,10 +318,10 @@ export class SessionManager {
       lastTouchedAt: now,
     };
 
-    this.syncSession(record);
+    syncSession(record);
     this.sessions.set(name, record);
 
-    return this.cloneSession(record.session);
+    return cloneSession(record.session);
   }
 
   async send(name: string, message: string): Promise<string> {
@@ -335,11 +335,11 @@ export class SessionManager {
     try {
       const response = await record.engineInstance.send(message);
       record.lastTouchedAt = Date.now();
-      this.syncSession(record);
+      syncSession(record);
       return response;
     } catch (error) {
       record.lastTouchedAt = Date.now();
-      this.syncSession(record);
+      syncSession(record);
       throw this.wrapSessionError('send', name, record.session.engine, error);
     }
   }
@@ -352,10 +352,10 @@ export class SessionManager {
     try {
       await record.engineInstance.stop();
       record.lastTouchedAt = Date.now();
-      this.syncSession(record);
+      syncSession(record);
     } catch (error) {
       record.lastTouchedAt = Date.now();
-      this.syncSession(record);
+      syncSession(record);
       throw this.wrapSessionError('stop', name, record.session.engine, error);
     }
   }
@@ -364,8 +364,8 @@ export class SessionManager {
     this.cleanupExpiredSessions();
 
     return Array.from(this.sessions.values()).map((record) => {
-      this.syncSession(record);
-      return this.cloneSession(record.session);
+      syncSession(record);
+      return cloneSession(record.session);
     });
   }
 
@@ -377,8 +377,8 @@ export class SessionManager {
       return undefined;
     }
 
-    this.syncSession(record);
-    return this.cloneSession(record.session);
+    syncSession(record);
+    return cloneSession(record.session);
   }
 
   async dispose(): Promise<void> {
@@ -397,19 +397,7 @@ export class SessionManager {
 
   private cleanupExpiredSessions(): void {
     const ttlMs = this.config.ttlMs ?? DEFAULT_TTL_MS;
-    const now = Date.now();
-
-    for (const [name, record] of this.sessions.entries()) {
-      if (now - record.lastTouchedAt < ttlMs) {
-        continue;
-      }
-
-      record.session.status = 'expired';
-      this.sessions.delete(name);
-      void record.engineInstance.stop().catch(() => {
-        // Expired sessions are best-effort cleaned up in the background.
-      });
-    }
+    cleanupExpiredSessions(this.sessions, ttlMs);
   }
 
   private enforceConcurrentSessionLimit(): void {
@@ -487,70 +475,6 @@ export class SessionManager {
     }
 
     return session;
-  }
-
-  private syncSession(record: SessionRecord): void {
-    const engineStatus = record.engineInstance.status();
-
-    record.session.model = engineStatus.model || record.session.model;
-    record.config.model = record.session.model;
-    record.session.costUsd = engineStatus.usage.costUsd;
-    record.session.tokenCount = { ...engineStatus.usage.tokenCount };
-
-    if (record.session.status === 'expired') {
-      return;
-    }
-
-    if (engineStatus.state === 'error') {
-      record.session.status = 'error';
-      return;
-    }
-
-    if (engineStatus.state === 'stopped') {
-      record.session.status = 'stopped';
-      return;
-    }
-
-    record.session.status = 'active';
-  }
-
-  private cloneSession(session: ISession): ISession {
-    return {
-      ...session,
-      createdAt: new Date(session.createdAt),
-      tokenCount: { ...session.tokenCount },
-    };
-  }
-
-  private toSessionInfo(name: string, record: SessionRecord): SessionInfo {
-    const session = this.cloneSession(record.session);
-    const status = record.engineInstance.status();
-
-    return {
-      ...session,
-      name,
-      cwd: record.config.cwd ?? null,
-      engineState: status.state,
-      engineSessionId: status.sessionId,
-      lastTouchedAt: new Date(record.lastTouchedAt),
-      lastError: status.usage.lastError,
-    };
-  }
-
-  private createEmptyBreakdownMap(): Record<EngineKind, EngineCostBreakdown> {
-    return {
-      claude: this.createEmptyBreakdown(),
-      codex: this.createEmptyBreakdown(),
-      grok: this.createEmptyBreakdown(),
-    };
-  }
-
-  private createEmptyBreakdown(): EngineCostBreakdown {
-    return {
-      sessionCount: 0,
-      costUsd: 0,
-      tokenCount: emptyTokenUsage(),
-    };
   }
 
   private resolveDefaultRoute(preferredEngine?: EngineKind) {
