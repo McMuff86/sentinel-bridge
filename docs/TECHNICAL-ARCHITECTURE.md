@@ -158,6 +158,16 @@ stop()  → clear conversation history → cleanup
 
 The SessionManager is the central orchestrator. It owns all active sessions and provides the API surface that tools call.
 
+After the current refactor pass, it is deliberately thinner than before:
+
+- `src/routing/resolve-model-route.ts` handles model resolution
+- `src/routing/expand-fallback-chain.ts` handles fallback ordering
+- `src/routing/routing-trace.ts` captures routing decisions during session start
+- `src/routing/provider-capabilities.ts` is a light capability registry for future routing rules
+- `src/engines/create-engine.ts` handles engine construction
+- `src/sessions/session-info.ts` shapes session/status payloads
+- `src/sessions/session-cleanup.ts` owns TTL expiry cleanup
+
 ```typescript
 class SessionManager {
   private sessions: Map<string, ManagedSession>;
@@ -206,6 +216,7 @@ Auto-generated names follow the pattern: `{engine}-{adjective}-{noun}` (e.g., `c
 
 - Configurable via plugin `sessionTTLMs` and `cleanupIntervalMs` (**milliseconds**); see `src/plugin.ts` / `SessionManager` defaults
 - Periodic sweep removes idle sessions past TTL
+- Cleanup logic now lives in `src/sessions/session-cleanup.ts`
 - Session resume uses engine-level `resumeSessionId` where supported (see Claude engine)
 
 ### Concurrency
@@ -213,6 +224,19 @@ Auto-generated names follow the pattern: `{engine}-{adjective}-{noun}` (e.g., `c
 - `maxConcurrentSessions` limit (default: 5)
 - New session requests beyond the limit return an error with active session names
 - Each engine runs in its own subprocess/context — no shared state
+
+## Routing trace
+
+Session starts now capture a minimal routing trace that records:
+
+- requested model / requested engine
+- primary resolved route
+- fallback chain considered
+- each attempted engine/model pair
+- selected engine/model on success
+- failure reason on unsuccessful attempts
+
+This trace is exposed through session status/info payloads and is meant as the first observability seam for future policy work.
 
 ## OpenClaw Plugin Integration
 

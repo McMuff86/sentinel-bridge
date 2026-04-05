@@ -6,25 +6,31 @@ This file is for **future agents and contributors** so they can continue work wi
 
 OpenClaw plugin that exposes **Claude Code CLI**, **Codex CLI**, and **Grok (HTTP API)** behind one `SessionManager`. Tools live under the `sb_*` namespace in `src/index.ts`.
 
+The project is now being reshaped into four clear seams:
+- `routing/`
+- `engines/`
+- `sessions/`
+- `session-manager.ts` as orchestration facade
+
 ## Branch / merge situation (as of 2026-04)
 
-- **`origin/main`** may lag; parallel work was split across branches:
-  - **Claude engine live work**: local worktree `/tmp/sb-claude-engine`, branch `feat/claude-engine-live` (not in this clone by default).
-  - **Codex agents**: `sb-codex-auth-v2` → `src/engines/codex-engine.ts` + tests; `sb-tracking-v2` → `src/tracking.ts` (new) + tests.
-- **This branch (`feat/model-routing`)** intentionally touches **only** orchestration and docs:
-  - `src/session-manager.ts` — model alias map, routing, **start-session fallback chain**
-  - `src/types.ts`, `src/plugin.ts`, `src/index.ts` — config wiring + tool copy
-  - `src/__tests__/session-manager.test.ts` — routing + fallback (mocked engines)
-  - `docs/API-REFERENCE.md`, this file
+- The earlier `feat/model-routing` work has been merged back into `main`.
+- A cleanup/refactor pass has already landed:
+  - routing extracted to `src/routing/*`
+  - engine factory extracted to `src/engines/create-engine.ts`
+  - session cleanup/info helpers extracted to `src/sessions/*`
+  - routing trace added for session starts
 
-**Merge order suggestion:** merge `main` baseline first, then this branch, then Codex/tracking branches, then Claude engine branch—resolve conflicts in engine files on the feature branches.
+If you continue from here, assume `main` is now the integration branch for the cleaner architecture.
 
 ## Key code paths
 
 | Area | File | Notes |
 |------|------|--------|
 | Plugin entry | `src/index.ts` | `activate()`, tool table, `toSessionManagerConfig()` |
-| Orchestration | `src/session-manager.ts` | Sessions, TTL, `resolveModelRoute()`, `startSession()` with fallback |
+| Orchestration | `src/session-manager.ts` | Thin facade: session lifecycle + coordination |
+| Routing | `src/routing/*` | aliases, resolution, fallback order, routing trace, capability hints |
+| Sessions | `src/sessions/*` | cleanup, session info shaping, shared session record types |
 | Plugin defaults | `src/plugin.ts` | `DEFAULT_CONFIG`, OpenClaw-facing config shape |
 | Shared types | `src/types.ts` | `EngineKind`, `SentinelBridgeConfig`, `ModelRoute`, etc. |
 | Engines | `src/engines/*.ts` | **Isolated** per engine; SessionManager instantiates them |
@@ -33,7 +39,8 @@ OpenClaw plugin that exposes **Claude Code CLI**, **Codex CLI**, and **Grok (HTT
 
 - **Prefix form:** `claude/...`, `codex/...` or `openai/...`, `grok/...` or `xai/...` forces engine.
 - **Inference:** e.g. `claude-*`, `opus` / `sonnet` / `haiku` → Claude; `gpt-*`, `codex` → Codex; `grok-*` → Grok.
-- **Aliases:** per-engine map in `MODEL_ALIASES` inside `session-manager.ts` (e.g. `opus` → `claude-opus-4-6`, `codex` → `gpt-5.4`).
+- **Aliases:** per-engine map in `src/routing/model-aliases.ts` (e.g. `opus` → `claude-opus-4-6`, `codex` → `gpt-5.4`).
+- **Trace:** session start stores attempted routes in `routingTrace` for observability.
 
 ## Fallback chain (current behavior)
 
@@ -53,10 +60,11 @@ npm run lint
 
 Engine unit tests under `src/__tests__/` are not all present in minimal checkouts; **session-manager** tests mock `ClaudeEngine` / `CodexEngine` / `GrokEngine` to avoid real CLI/API.
 
-## Suggested next tasks (no overlap with reserved branches)
+## Suggested next tasks
 
+- Use `src/routing/provider-capabilities.ts` as the basis for future capability-based routing rules.
 - `src/engines/grok-engine.ts` — HTTP hardening, errors, rate limits (medium).
-- After merges: align **plugin default model** strings with alias targets if product wants one canonical Opus id everywhere.
+- Align plugin default model strings with alias targets if product wants one canonical Opus id everywhere.
 - Integration tests (manual): real `claude` / `codex` binaries and `XAI_API_KEY` for Grok.
 
 ## Conventions reminder

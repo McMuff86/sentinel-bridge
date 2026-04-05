@@ -82,9 +82,9 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 ## Features
 
 - **Multi-engine sessions** — Claude, Codex, and Grok through one interface
-- **Routing layer** — model aliases, engine inference, and configurable start fallback chains
+- **Routing layer** — model aliases, engine inference, configurable start fallback chains, and routing trace metadata
 - **Session continuity** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
-- **Observability** — per-session status, routing info, token usage, and cost tracking
+- **Observability** — per-session status, routing decisions, token usage, and cost tracking
 - **Plugin surface** — `sb_*` tools for session lifecycle, engines, routing, cost, and compact
 - **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
@@ -152,9 +152,19 @@ It is:
 - a stable routing layer,
 - provider adapters with one common interface,
 - explicit fallback behaviour,
-- session continuity across heterogeneous engines.
+- session continuity across heterogeneous engines,
+- observable routing decisions.
 
 That makes it useful even when OpenClaw itself gains stronger native provider support.
+
+## Current internal shape
+
+The codebase is now intentionally split into a few small seams:
+
+- `src/routing/*` → model aliases, model resolution, fallback expansion, routing trace, provider capability hints
+- `src/engines/*` → engine adapters + engine factory
+- `src/sessions/*` → session cleanup, session info shaping, session record types
+- `src/session-manager.ts` → orchestration facade
 
 ## Tools
 
