@@ -323,7 +323,7 @@ Maintained as a runtime-mutable map with known defaults. Users can override via 
 | Model | Input/1M | Output/1M | Cached/1M |
 |-------|----------|-----------|-----------|
 | claude-opus-4 | $15.00 | $75.00 | $1.50 |
-| claude-sonnet-4 | $3.00 | $15.00 | $0.30 |
+| claude-sonnet-4-5 | $3.00 | $15.00 | $0.30 |
 | o4-mini | $1.10 | $4.40 | — |
 | codex-mini | $1.50 | $6.00 | — |
 | grok-3 | $3.00 | $15.00 | — |

@@ -178,10 +178,21 @@ export class CodexEngine implements IEngine {
     const command = this.config.command ?? "codex";
     const args = this.buildArgs(message);
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const apiKey = this.resolveApiKey();
     const env = {
       ...(process?.env ?? {}),
       ...(this.config.env ?? {}),
-    };
+    } as Record<string, string | undefined>;
+
+    if (this.authMethod === "subscription") {
+      delete env.OPENAI_API_KEY;
+      delete env.CODEX_API_KEY;
+    }
+
+    if (this.authMethod === "apiKey" && apiKey) {
+      env.OPENAI_API_KEY = apiKey;
+      env.CODEX_API_KEY = apiKey;
+    }
 
     return await new Promise<CodexRunResult>((resolve, reject) => {
       let stdoutBuffer = "";
@@ -295,7 +306,6 @@ export class CodexEngine implements IEngine {
   }
 
   private buildArgs(message: string): string[] {
-    const apiKey = this.resolveApiKey();
     const baseArgs = [
       "exec",
       "--json",
@@ -303,7 +313,6 @@ export class CodexEngine implements IEngine {
       "workspace-write",
       "--model",
       this.config.model,
-      ...(this.authMethod === "apiKey" && apiKey ? ["--api-key", apiKey] : []),
       ...(this.config.args ?? []),
     ];
 
@@ -338,7 +347,7 @@ export class CodexEngine implements IEngine {
         handler(resolve, reject);
       };
 
-      const child = spawn(command, ["auth", "status"], {
+      const child = spawn(command, ["login", "status"], {
         cwd: this.config.cwd,
         env,
         stdio: ["ignore", "pipe", "pipe"],

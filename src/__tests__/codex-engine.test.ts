@@ -85,14 +85,14 @@ describe('CodexEngine', () => {
       total: 14,
     });
     expect(spawnMock).toHaveBeenCalledTimes(2);
-    expect(spawnMock.mock.calls[0]?.[1]).toEqual(['auth', 'status']);
+    expect(spawnMock.mock.calls[0]?.[1]).toEqual(['login', 'status']);
 
     const execArgs = getSpawnArgs(1);
     expect(execArgs).toContain('exec');
     expect(execArgs).not.toContain('--api-key');
   });
 
-  it('should fall back to apiKey auth and pass --api-key when subscription auth is unavailable', async () => {
+  it('should fall back to apiKey auth and pass the API key via environment when subscription auth is unavailable', async () => {
     mockSpawnSequence([
       {
         stderr: 'Not logged in.\n',
@@ -118,9 +118,11 @@ describe('CodexEngine', () => {
     expect(spawnMock).toHaveBeenCalledTimes(2);
 
     const execArgs = getSpawnArgs(1);
-    const apiKeyIndex = execArgs.indexOf('--api-key');
-    expect(apiKeyIndex).toBeGreaterThanOrEqual(0);
-    expect(execArgs[apiKeyIndex + 1]).toBe('sk-fallback');
+    expect(execArgs).not.toContain('--api-key');
+
+    const spawnOptions = getSpawnOptions(1);
+    const env = spawnOptions.env as Record<string, string | undefined>;
+    expect(env.OPENAI_API_KEY ?? env.CODEX_API_KEY).toBe('sk-fallback');
   });
 
   it('should report authMethod none when neither subscription auth nor apiKey is available', async () => {
@@ -200,6 +202,15 @@ function getSpawnArgs(index: number): string[] {
   }
 
   return args.map((value) => String(value));
+}
+
+function getSpawnOptions(index: number): Record<string, unknown> {
+  const options = spawnMock.mock.calls[index]?.[2];
+  if (!options || typeof options !== 'object') {
+    throw new Error(`Missing spawn options at call index ${index}.`);
+  }
+
+  return options as Record<string, unknown>;
 }
 
 class LocalMockStream implements MockStream {

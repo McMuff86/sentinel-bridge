@@ -338,6 +338,7 @@ export class ClaudeEngine implements IEngine {
   private buildArgs(message: string): string[] {
     const args = [
       "-p",
+      "--verbose",
       "--output-format",
       "stream-json",
       "--permission-mode",

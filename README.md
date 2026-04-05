@@ -101,7 +101,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 | Model | Aliases | Engine | Input/1M | Output/1M |
 |-------|---------|--------|----------|-----------|
 | claude-opus-4 | `opus` | Claude | $15.00* | $75.00* |
-| claude-sonnet-4 | `sonnet` | Claude | $3.00* | $15.00* |
+| claude-sonnet-4-5 | `sonnet` | Claude | $3.00* | $15.00* |
 | claude-haiku-4 | `haiku` | Claude | — | — |
 | o4-mini | — | Codex | $1.10 | $4.40 |
 | codex-mini | `codex-mini` | Codex | $1.50 | $6.00 |
@@ -126,7 +126,7 @@ Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`eng
       "engines": {
         "claude": {
           "command": "claude",
-          "defaultModel": "claude-sonnet-4"
+          "defaultModel": "claude-sonnet-4-5"
         },
         "codex": {
           "command": "codex",
