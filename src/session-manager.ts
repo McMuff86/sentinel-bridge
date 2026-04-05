@@ -23,6 +23,7 @@ import {
   syncSession,
   toSessionInfo,
 } from './sessions/session-info.js';
+import { SessionStore } from './sessions/session-store.js';
 import type { SessionRecord } from './sessions/types.js';
 import type {
   CostReport,
@@ -45,6 +46,7 @@ const DEFAULT_MAX_CONCURRENT_SESSIONS = 8;
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly config: SentinelBridgeConfig;
+  private readonly store = new SessionStore();
   private cleanupTimer: {
     unref?: () => void;
   } | null = null;
@@ -104,7 +106,9 @@ export class SessionManager {
           toRoutingAttempt({ engine, model: route.model }),
         );
 
-        return this.requireSessionInfo(options.name);
+        const info = this.requireSessionInfo(options.name);
+        this.store.upsert(info);
+        return info;
       } catch (error) {
         appendRoutingAttempt(
           routingTrace,
@@ -140,10 +144,16 @@ export class SessionManager {
   listSessions(): SessionInfo[] {
     this.cleanupExpiredSessions();
 
-    return Array.from(this.sessions.entries()).map(([name, record]) => {
+    const inMemory = Array.from(this.sessions.entries()).map(([name, record]) => {
       syncSession(record);
       return toSessionInfo(name, record);
     });
+
+    const persisted = this.store.list().filter(
+      (session) => !this.sessions.has(session.name),
+    );
+
+    return [...inMemory, ...persisted];
   }
 
   getSessionStatus(name: string): SessionInfo | undefined {
@@ -151,11 +161,13 @@ export class SessionManager {
 
     const record = this.sessions.get(name);
     if (!record) {
-      return undefined;
+      return this.store.get(name);
     }
 
     syncSession(record);
-    return toSessionInfo(name, record);
+    const info = toSessionInfo(name, record);
+    this.store.upsert(info);
+    return info;
   }
 
   getOverview(): SessionOverview {
@@ -355,7 +367,15 @@ export class SessionManager {
   async send(name: string, message: string): Promise<string> {
     this.cleanupExpiredSessions();
 
-    const record = this.requireSession(name);
+    let record = this.sessions.get(name);
+    if (!record) {
+      const persisted = this.store.get(name);
+      if (!persisted) {
+        throw new Error(`Session "${name}" not found.`);
+      }
+      record = await this.rehydrateSession(persisted);
+    }
+
     if (record.session.status !== 'active') {
       throw new Error(`Session "${name}" is not active.`);
     }
@@ -364,10 +384,12 @@ export class SessionManager {
       const response = await record.engineInstance.send(message);
       record.lastTouchedAt = Date.now();
       syncSession(record);
+      this.store.upsert(this.requireSessionInfo(name));
       return response;
     } catch (error) {
       record.lastTouchedAt = Date.now();
       syncSession(record);
+      this.store.upsert(this.requireSessionInfo(name));
       throw this.wrapSessionError('send', name, record.session.engine, error);
     }
   }
@@ -375,15 +397,22 @@ export class SessionManager {
   async stop(name: string): Promise<void> {
     this.cleanupExpiredSessions();
 
-    const record = this.requireSession(name);
+    const record = this.sessions.get(name);
+    if (!record) {
+      this.store.delete(name);
+      return;
+    }
 
     try {
       await record.engineInstance.stop();
       record.lastTouchedAt = Date.now();
       syncSession(record);
+      this.sessions.delete(name);
+      this.store.delete(name);
     } catch (error) {
       record.lastTouchedAt = Date.now();
       syncSession(record);
+      this.store.upsert(this.requireSessionInfo(name));
       throw this.wrapSessionError('stop', name, record.session.engine, error);
     }
   }
@@ -496,6 +525,45 @@ export class SessionManager {
     return record;
   }
 
+  private async rehydrateSession(session: SessionInfo): Promise<SessionRecord> {
+    const resolvedConfig = this.resolveEngineConfig(session.engine, {
+      model: session.model,
+      cwd: session.cwd ?? undefined,
+      resumeSessionId: session.engineSessionId ?? undefined,
+    });
+    const engineInstance = createEngine(session.engine, resolvedConfig);
+
+    try {
+      await engineInstance.start({
+        model: session.model,
+        cwd: session.cwd ?? undefined,
+        resumeSessionId: session.engineSessionId ?? undefined,
+      });
+    } catch (error) {
+      throw this.wrapSessionError('rehydrate', session.name, session.engine, error);
+    }
+
+    const record: SessionRecord = {
+      engineInstance,
+      session: {
+        id: session.id,
+        engine: session.engine,
+        model: session.model,
+        status: session.status,
+        createdAt: new Date(session.createdAt),
+        costUsd: session.costUsd,
+        tokenCount: { ...session.tokenCount },
+      },
+      config: resolvedConfig,
+      lastTouchedAt: session.lastTouchedAt.getTime(),
+      routingTrace: session.routingTrace,
+    };
+
+    syncSession(record);
+    this.sessions.set(session.name, record);
+    return record;
+  }
+
   private requireSessionInfo(name: string): SessionInfo {
     const session = this.getSessionStatus(name);
     if (!session) {
@@ -540,7 +608,7 @@ export class SessionManager {
   }
 
   private wrapSessionError(
-    action: 'start' | 'send' | 'stop' | 'compact',
+    action: 'start' | 'send' | 'stop' | 'compact' | 'rehydrate',
     name: string,
     engine: EngineKind,
     error: unknown,

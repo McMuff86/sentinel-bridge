@@ -146,11 +146,10 @@ describe("ClaudeEngine", () => {
       );
     });
 
-    it("generates sessionId if none provided", async () => {
+    it("does not invent a sessionId before the first successful prompt", async () => {
       const engine = new ClaudeEngine(baseConfig());
       await engine.start();
-      expect(engine.getSessionId()).toBeTruthy();
-      expect(typeof engine.getSessionId()).toBe("string");
+      expect(engine.getSessionId()).toBeNull();
     });
 
     it("preserves resumeSessionId", async () => {
@@ -214,25 +213,24 @@ describe("ClaudeEngine", () => {
       await p1;
     });
 
-    it("passes --session-id on first prompt", async () => {
+    it("does not pass --session-id or --resume on the first fresh prompt", async () => {
       const child = makeChildProcess();
       mockedSpawn.mockReturnValue(child as any);
 
       const engine = new ClaudeEngine(baseConfig());
       await engine.start();
-      const sessionId = engine.getSessionId()!;
 
       const sendPromise = engine.send("test");
       child.emitStdout(
-        JSON.stringify({ type: "result", result: "ok" }) + "\n",
+        JSON.stringify({ type: "result", result: "ok", session_id: "sess-new" }) + "\n",
       );
       child.emit("close", 0, null);
       await sendPromise;
 
       const spawnArgs = mockedSpawn.mock.calls[0]![1] as string[];
-      expect(spawnArgs).toContain("--session-id");
-      expect(spawnArgs).toContain(sessionId);
+      expect(spawnArgs).not.toContain("--session-id");
       expect(spawnArgs).not.toContain("--resume");
+      expect(engine.getSessionId()).toBe("sess-new");
     });
 
     it("passes --resume on subsequent prompts", async () => {
@@ -568,7 +566,7 @@ describe("ClaudeEngine", () => {
           }),
         }),
       );
-      expect(status.sessionId).toBeTruthy();
+      expect(status.sessionId).toBeNull();
     });
   });
 

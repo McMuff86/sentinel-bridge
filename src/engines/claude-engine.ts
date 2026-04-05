@@ -91,8 +91,8 @@ export class ClaudeEngine implements IEngine {
       throw new Error(msg);
     }
 
-    if (!this.sessionId) {
-      this.sessionId = this.config.resumeSessionId ?? crypto.randomUUID();
+    if (this.config.resumeSessionId) {
+      this.sessionId = this.config.resumeSessionId;
     }
 
     this.state = "running";
