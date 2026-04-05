@@ -7,6 +7,11 @@ import {
   mergeTokenUsage,
   roundUsd,
 } from './engines/shared.js';
+import { expandFallbackChain } from './routing/expand-fallback-chain.js';
+import {
+  resolveDefaultRoute,
+  resolveModelRoute,
+} from './routing/resolve-model-route.js';
 import type {
   CostReport,
   EngineConfig,
@@ -14,7 +19,6 @@ import type {
   EngineKind,
   IEngine,
   ISession,
-  ModelRoute,
   SentinelBridgeConfig,
   SendMessageResult,
   SessionInfo,
@@ -30,45 +34,9 @@ interface SessionRecord {
   lastTouchedAt: number;
 }
 
-type ParsedModelReference = {
-  engine?: EngineKind;
-  model: string;
-};
-
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_CONCURRENT_SESSIONS = 8;
-
-const DEFAULT_FALLBACK_CHAIN: EngineKind[] = ['claude', 'codex', 'grok'];
-
-const MODEL_ALIASES: Record<EngineKind, Record<string, string>> = {
-  claude: {
-    opus: 'claude-opus-4-6',
-    'opus-4.6': 'claude-opus-4-6',
-    'claude-opus-4': 'claude-opus-4-6',
-    sonnet: 'claude-sonnet-4',
-    'claude-sonnet-4': 'claude-sonnet-4',
-    haiku: 'claude-haiku-4',
-    'claude-haiku-4': 'claude-haiku-4',
-  },
-  codex: {
-    codex: 'gpt-5.4',
-    'gpt-5.4': 'gpt-5.4',
-    'gpt-5': 'gpt-5.4',
-    'o4-mini': 'o4-mini',
-    'codex-mini': 'codex-mini',
-  },
-  grok: {
-    grok: 'grok-4-1-fast',
-    'grok-4': 'grok-4',
-    'grok-4-fast': 'grok-4-fast',
-    'grok-4-1-fast': 'grok-4-1-fast',
-    '4-1-fast': 'grok-4-1-fast',
-    'grok-3': 'grok-3',
-    'grok-mini': 'grok-3-mini',
-    'grok-3-mini': 'grok-3-mini',
-  },
-};
 
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
@@ -99,7 +67,7 @@ export class SessionManager {
       ? this.resolveModelRoute(options.model, options.engine)
       : this.resolveDefaultRoute(options.engine);
     const primaryEngine = options.engine ?? primaryRoute.engine;
-    const enginesToTry = this.expandFallbackChain(primaryEngine);
+    const enginesToTry = expandFallbackChain(this.config, primaryEngine);
 
     let lastError: unknown;
     for (let index = 0; index < enginesToTry.length; index++) {
@@ -258,57 +226,14 @@ export class SessionManager {
     };
   }
 
-  resolveModelRoute(
-    model: string,
-    preferredEngine?: EngineKind,
-  ): ModelRoute {
-    const trimmedModel = model.trim();
-    if (!trimmedModel) {
-      return this.resolveDefaultRoute(preferredEngine);
-    }
-
-    const parsed = this.parseModelReference(trimmedModel);
-    if (
-      preferredEngine &&
-      parsed.engine &&
-      parsed.engine !== preferredEngine
-    ) {
-      throw new Error(
-        `Model "${trimmedModel}" does not match requested engine "${preferredEngine}".`,
-      );
-    }
-
-    const detectedEngine = parsed.engine ?? this.inferEngineFromModel(parsed.model);
-    const engine =
-      preferredEngine ??
-      detectedEngine ??
-      this.config.defaultEngine ??
-      'claude';
-    const conflictingEngine =
-      preferredEngine && !parsed.engine
-        ? this.inferEngineFromModel(parsed.model)
-        : undefined;
-
-    if (
-      preferredEngine &&
-      conflictingEngine &&
-      conflictingEngine !== preferredEngine &&
-      !this.isKnownAliasForEngine(preferredEngine, parsed.model)
-    ) {
-      throw new Error(
-        `Model "${trimmedModel}" does not match requested engine "${preferredEngine}".`,
-      );
-    }
-
-    const resolvedModel = this.resolveModelAlias(engine, parsed.model);
-    const source = resolvedModel === parsed.model ? 'explicit' : 'alias';
-
-    return {
-      model: resolvedModel,
-      engine,
-      subscriptionCovered: engine === 'claude',
-      source,
-    };
+  resolveModelRoute(model: string, preferredEngine?: EngineKind) {
+    return resolveModelRoute(
+      this.config,
+      (engine) => this.getEngineDefaults(engine),
+      (engine) => this.getFallbackModel(engine),
+      model,
+      preferredEngine,
+    );
   }
 
   async compactSession(
@@ -645,112 +570,12 @@ export class SessionManager {
     };
   }
 
-  private resolveDefaultRoute(preferredEngine?: EngineKind): ModelRoute {
-    const defaultModel = this.config.defaultModel?.trim();
-    if (defaultModel) {
-      const parsedDefault = this.parseModelReference(defaultModel);
-      const defaultEngine =
-        parsedDefault.engine ?? this.inferEngineFromModel(parsedDefault.model);
-
-      if (!preferredEngine || !defaultEngine || defaultEngine === preferredEngine) {
-        const route = this.resolveModelRoute(defaultModel, preferredEngine);
-        return {
-          ...route,
-          source: 'default',
-        };
-      }
-    }
-
-    const engine = preferredEngine ?? this.config.defaultEngine ?? 'claude';
-    const defaults = this.getEngineDefaults(engine);
-
-    return {
-      engine,
-      model: defaults.model ?? this.getFallbackModel(engine),
-      subscriptionCovered: engine === 'claude',
-      source: 'default',
-    };
-  }
-
-  private parseModelReference(model: string): ParsedModelReference {
-    const [rawPrefix, ...rest] = model.split('/');
-    if (rest.length === 0) {
-      return { model };
-    }
-
-    const engine = this.parseEngineKind(rawPrefix);
-    return {
-      engine,
-      model: rest.join('/'),
-    };
-  }
-
-  private parseEngineKind(value: string): EngineKind | undefined {
-    switch (value.trim().toLowerCase()) {
-      case 'claude':
-        return 'claude';
-      case 'codex':
-      case 'openai':
-        return 'codex';
-      case 'grok':
-      case 'xai':
-        return 'grok';
-      default:
-        return undefined;
-    }
-  }
-
-  private inferEngineFromModel(model: string): EngineKind | undefined {
-    const normalizedModel = model.trim().toLowerCase();
-
-    if (!normalizedModel) {
-      return undefined;
-    }
-
-    if (
-      normalizedModel.startsWith('claude-') ||
-      normalizedModel === 'opus' ||
-      normalizedModel === 'sonnet' ||
-      normalizedModel === 'haiku' ||
-      normalizedModel === 'opus-4.6'
-    ) {
-      return 'claude';
-    }
-
-    if (
-      normalizedModel.startsWith('grok-') ||
-      normalizedModel === 'grok' ||
-      normalizedModel === 'grok-mini' ||
-      normalizedModel === '4-1-fast'
-    ) {
-      return 'grok';
-    }
-
-    if (
-      normalizedModel.startsWith('gpt-') ||
-      normalizedModel.startsWith('o4-') ||
-      normalizedModel.startsWith('codex-') ||
-      normalizedModel === 'codex'
-    ) {
-      return 'codex';
-    }
-
-    return undefined;
-  }
-
-  private resolveModelAlias(engine: EngineKind, model: string): string {
-    const normalizedModel = model.trim().toLowerCase();
-    const alias = MODEL_ALIASES[engine][normalizedModel];
-
-    return alias ?? model.trim();
-  }
-
-  private isKnownAliasForEngine(engine: EngineKind, model: string): boolean {
-    const normalizedModel = model.trim().toLowerCase();
-
-    return (
-      Boolean(MODEL_ALIASES[engine][normalizedModel]) ||
-      this.inferEngineFromModel(normalizedModel) === engine
+  private resolveDefaultRoute(preferredEngine?: EngineKind) {
+    return resolveDefaultRoute(
+      this.config,
+      (engine) => this.getEngineDefaults(engine),
+      (engine) => this.getFallbackModel(engine),
+      preferredEngine,
     );
   }
 
@@ -792,33 +617,4 @@ export class SessionManager {
     );
   }
 
-  /**
-   * Primary engine is always first; remaining engines follow plugin order without duplicates.
-   */
-  private expandFallbackChain(primary: EngineKind): EngineKind[] {
-    const configured = this.config.defaultFallbackChain;
-    const chain =
-      configured === undefined ? DEFAULT_FALLBACK_CHAIN : configured;
-
-    if (!chain.length) {
-      return [primary];
-    }
-
-    const seen = new Set<EngineKind>();
-    const ordered: EngineKind[] = [];
-
-    if (!seen.has(primary)) {
-      seen.add(primary);
-      ordered.push(primary);
-    }
-
-    for (const engine of chain) {
-      if (!seen.has(engine)) {
-        seen.add(engine);
-        ordered.push(engine);
-      }
-    }
-
-    return ordered;
-  }
 }
