@@ -472,6 +472,7 @@ function serializeTurnResult(result: {
     output: result.output,
     sessionId: result.session.engineSessionId,
     session: serializeSession(result.session),
+    routing: summarizeRoutingTrace(result.session.routingTrace),
     stats: {
       tokensIn: result.session.tokenCount.input,
       tokensOut: result.session.tokenCount.output,
@@ -540,7 +541,45 @@ function serializeSession(session: {
           selectedModel: session.routingTrace.selectedModel,
         }
       : undefined,
+    routing: summarizeRoutingTrace(session.routingTrace),
     subscriptionCovered: session.engine === 'claude',
+  };
+}
+
+function summarizeRoutingTrace(
+  trace:
+    | {
+        requestedModel: string | null;
+        requestedEngine?: EngineKind;
+        primary: {
+          model: string;
+          engine: EngineKind;
+          subscriptionCovered: boolean;
+          source: string;
+        };
+        fallbackChain: EngineKind[];
+        attempts: { engine: EngineKind; model: string; ok: boolean; error?: string }[];
+        selectedEngine?: EngineKind;
+        selectedModel?: string;
+      }
+    | undefined,
+): Record<string, unknown> | undefined {
+  if (!trace) {
+    return undefined;
+  }
+
+  return {
+    requestedModel: trace.requestedModel,
+    requestedEngine: trace.requestedEngine,
+    primary: `${trace.primary.engine}/${trace.primary.model}`,
+    selected: trace.selectedEngine && trace.selectedModel
+      ? `${trace.selectedEngine}/${trace.selectedModel}`
+      : undefined,
+    attempts: trace.attempts.map((attempt) => ({
+      route: `${attempt.engine}/${attempt.model}`,
+      ok: attempt.ok,
+      error: attempt.error,
+    })),
   };
 }
 

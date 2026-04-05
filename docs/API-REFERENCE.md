@@ -38,14 +38,14 @@ Starts a session. If the primary engine’s `start()` fails, retries along **`de
 | `cwd` | no | Working directory |
 | `resumeSessionId` | no | Engine-specific resume id |
 
-**Returns:** `{ ok: true, session: { ... } }` — serialized `SessionInfo` (id, name, engine, model, status, costs, tokenCount, paths, engine state, lastError, etc.).
+**Returns:** `{ ok: true, session: { ... } }` — serialized `SessionInfo` (id, name, engine, model, status, costs, tokenCount, paths, engine state, lastError, routing, etc.).
 
 ---
 
 ### `sb_session_send`
 
 **Parameters:** `name`, `message` (required).  
-**Returns:** `{ ok, name, output, session, sessionId, stats }`.
+**Returns:** `{ ok, name, output, session, sessionId, routing, stats }`.
 
 ---
 
@@ -114,7 +114,7 @@ Examples: `claude-*`, `opus`, `sonnet`, `haiku` → **Claude**; `gpt-*`, `codex`
 
 ### Alias map (high level)
 
-Defined in `src/session-manager.ts` (`MODEL_ALIASES`). Examples:
+Defined in `src/routing/model-aliases.ts`. Examples:
 
 | Alias / pattern | Resolves toward | Engine |
 |-----------------|-----------------|--------|
@@ -148,5 +148,14 @@ Exact keys include additional synonyms (e.g. `grok-4-1-fast`); see source for th
 `active` | `stopped` | `expired` | `error` — see `SessionManager` and engine `status()` snapshots.
 
 ---
+
+## Routing output
+
+Session payloads now include both:
+
+- `routingTrace` → full structured trace
+- `routing` → compact human-friendly summary
+
+Use `routing` for UI/status surfaces and `routingTrace` for debugging.
 
 Further architecture notes: [TECHNICAL-ARCHITECTURE.md](./TECHNICAL-ARCHITECTURE.md). Contributor onboarding and branch notes: [CONTEXT-HANDOFF.md](./CONTEXT-HANDOFF.md).
