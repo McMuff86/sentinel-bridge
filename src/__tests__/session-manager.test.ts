@@ -133,6 +133,12 @@ describe('SessionManager', () => {
 
       const session = manager.getSessionStatus('alpha');
       expect(session?.engine).toBe('codex');
+      expect(session?.routingTrace?.requestedModel).toBe('opus');
+      expect(session?.routingTrace?.attempts).toEqual([
+        expect.objectContaining({ engine: 'claude', ok: false }),
+        expect.objectContaining({ engine: 'codex', ok: true }),
+      ]);
+      expect(session?.routingTrace?.selectedEngine).toBe('codex');
     });
 
     it('should not fall back when defaultFallbackChain is empty', async () => {

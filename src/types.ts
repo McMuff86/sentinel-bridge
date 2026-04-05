@@ -96,6 +96,23 @@ export interface SessionStartOptions {
   resumeSessionId?: string;
 }
 
+export interface RoutingTraceAttempt {
+  engine: EngineKind;
+  model: string;
+  ok: boolean;
+  error?: string;
+}
+
+export interface RoutingTrace {
+  requestedModel: string | null;
+  requestedEngine?: EngineKind;
+  primary: ModelRoute;
+  fallbackChain: EngineKind[];
+  attempts: RoutingTraceAttempt[];
+  selectedEngine?: EngineKind;
+  selectedModel?: string;
+}
+
 export interface SessionInfo extends ISession {
   name: string;
   cwd: string | null;
@@ -103,6 +120,7 @@ export interface SessionInfo extends ISession {
   engineSessionId: string | null;
   lastTouchedAt: Date;
   lastError?: string;
+  routingTrace?: RoutingTrace;
 }
 
 export interface SendMessageResult {

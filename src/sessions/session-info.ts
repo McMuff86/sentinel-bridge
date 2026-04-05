@@ -55,6 +55,7 @@ export function toSessionInfo(
     engineSessionId: status.sessionId,
     lastTouchedAt: new Date(record.lastTouchedAt),
     lastError: status.usage.lastError,
+    routingTrace: record.routingTrace,
   };
 }
 

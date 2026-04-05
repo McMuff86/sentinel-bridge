@@ -500,6 +500,20 @@ function serializeSession(session: {
   engineSessionId: string | null;
   lastTouchedAt: Date;
   lastError?: string;
+  routingTrace?: {
+    requestedModel: string | null;
+    requestedEngine?: EngineKind;
+    primary: {
+      model: string;
+      engine: EngineKind;
+      subscriptionCovered: boolean;
+      source: string;
+    };
+    fallbackChain: EngineKind[];
+    attempts: { engine: EngineKind; model: string; ok: boolean; error?: string }[];
+    selectedEngine?: EngineKind;
+    selectedModel?: string;
+  };
 }): Record<string, unknown> {
   return {
     id: session.id,
@@ -515,6 +529,17 @@ function serializeSession(session: {
     engineSessionId: session.engineSessionId,
     lastTouchedAt: session.lastTouchedAt.toISOString(),
     lastError: session.lastError,
+    routingTrace: session.routingTrace
+      ? {
+          requestedModel: session.routingTrace.requestedModel,
+          requestedEngine: session.routingTrace.requestedEngine,
+          primary: { ...session.routingTrace.primary },
+          fallbackChain: [...session.routingTrace.fallbackChain],
+          attempts: session.routingTrace.attempts.map((attempt) => ({ ...attempt })),
+          selectedEngine: session.routingTrace.selectedEngine,
+          selectedModel: session.routingTrace.selectedModel,
+        }
+      : undefined,
     subscriptionCovered: session.engine === 'claude',
   };
 }

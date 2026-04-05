@@ -7,6 +7,11 @@ import {
 } from './engines/shared.js';
 import { expandFallbackChain } from './routing/expand-fallback-chain.js';
 import {
+  appendRoutingAttempt,
+  createRoutingTrace,
+  toRoutingAttempt,
+} from './routing/routing-trace.js';
+import {
   resolveDefaultRoute,
   resolveModelRoute,
 } from './routing/resolve-model-route.js';
@@ -67,6 +72,13 @@ export class SessionManager {
     const primaryEngine = options.engine ?? primaryRoute.engine;
     const enginesToTry = expandFallbackChain(this.config, primaryEngine);
 
+    const routingTrace = createRoutingTrace({
+      requestedModel: options.model,
+      requestedEngine: options.engine,
+      primary: primaryRoute,
+      fallbackChain: enginesToTry,
+    });
+
     let lastError: unknown;
     for (let index = 0; index < enginesToTry.length; index++) {
       const engine = enginesToTry[index]!;
@@ -80,8 +92,18 @@ export class SessionManager {
           resumeSessionId: index === 0 ? options.resumeSessionId : undefined,
         });
 
+        const record = this.requireSession(options.name);
+        record.routingTrace = appendRoutingAttempt(
+          routingTrace,
+          toRoutingAttempt({ engine, model: route.model }),
+        );
+
         return this.requireSessionInfo(options.name);
       } catch (error) {
+        appendRoutingAttempt(
+          routingTrace,
+          toRoutingAttempt({ engine, model: route.model, error }),
+        );
         lastError = error;
       }
     }
