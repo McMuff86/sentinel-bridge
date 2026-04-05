@@ -17,6 +17,11 @@
     "README.md",
     "LICENSE"
   ],
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
   "engines": {
     "node": ">=22"
   },

@@ -75,11 +75,15 @@ interface PluginLogger {
 interface PluginApi {
   registerTool: (tool: {
     name: string;
+    label?: string;
     description: string;
     parameters: unknown;
-    handler: (...args: unknown[]) => Promise<unknown>;
+    execute: (id: string, params: Record<string, unknown>) => Promise<{
+      content: Array<{ type: 'text'; text: string }>;
+      details?: Record<string, unknown>;
+    }>;
   }) => void;
-  registerCliBackend?: (id: string, config: Record<string, unknown>) => void;
+  registerCliBackend?: (backend: Record<string, unknown>) => void;
   getConfig?: () => Record<string, unknown>;
   logger?: PluginLogger;
 }
@@ -372,21 +376,35 @@ export function activate(api: PluginApi): void {
   for (const tool of tools) {
     api.registerTool({
       name: tool.name,
+      label: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-      handler: async (...args: unknown[]) => {
-        const params = (args[0] ?? {}) as Record<string, unknown>;
-        return tool.handler(params, ctx);
+      execute: async (_id: string, params: Record<string, unknown>) => {
+        const result = await tool.handler(params ?? {}, ctx);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result),
+            },
+          ],
+          details:
+            result && typeof result === 'object'
+              ? (result as Record<string, unknown>)
+              : undefined,
+        };
       },
     });
   }
 
   if (api.registerCliBackend) {
     if (config.engines?.claude?.enabled !== false) {
-      api.registerCliBackend('sentinel-claude', {
+      api.registerCliBackend({
+        id: 'sentinel-claude',
         command: config.engines?.claude?.command ?? 'claude',
         args: [
           '-p',
+          '--verbose',
           '--output-format',
           'stream-json',
           '--permission-mode',
@@ -401,7 +419,8 @@ export function activate(api: PluginApi): void {
     }
 
     if (config.engines?.codex?.enabled !== false) {
-      api.registerCliBackend('sentinel-codex', {
+      api.registerCliBackend({
+        id: 'sentinel-codex',
         command: config.engines?.codex?.command ?? 'codex',
         args: ['exec', '--json', '--sandbox', 'workspace-write'],
         output: 'jsonl',
