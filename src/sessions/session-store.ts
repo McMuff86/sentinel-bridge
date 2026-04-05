@@ -31,6 +31,7 @@ type PersistedSessionRecord = {
     lastResponsePreview: string | null;
     isRehydrated: boolean;
   };
+  turnCount?: number;
 };
 
 type SessionStoreData = {
@@ -93,6 +94,7 @@ export class SessionStore {
         lastResponsePreview: session.activity.lastResponsePreview,
         isRehydrated: session.activity.isRehydrated,
       },
+      turnCount: session.turnCount,
     };
     this.save(data);
   }
@@ -154,5 +156,6 @@ function toSessionInfoFromPersisted(item: PersistedSessionRecord): SessionInfo {
           lastResponsePreview: null,
           isRehydrated: false,
         },
+    turnCount: item.turnCount ?? 0,
   };
 }

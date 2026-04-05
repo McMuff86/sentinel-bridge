@@ -38,6 +38,7 @@ import type {
   SessionInfo,
   SessionOverview,
   SessionStartOptions,
+  SessionSummary,
   TokenUsage,
   TurnUsage,
 } from './types.js';
@@ -158,6 +159,7 @@ export class SessionManager {
     record.updatedAt = now;
     record.lastPromptPreview = truncatePreview(message);
     record.lastResponsePreview = truncatePreview(output);
+    record.turnCount += 1;
     this.emit('message_completed', name, record.session.engine);
 
     const session = this.requireSessionInfo(name);
@@ -259,6 +261,18 @@ export class SessionManager {
       ),
     );
 
+    const sessionSummaries: SessionSummary[] = sessions.map((s) => ({
+      name: s.name,
+      engine: s.engine,
+      model: s.model,
+      status: s.status,
+      phase: s.activity.phase,
+      costUsd: s.costUsd,
+      turnCount: s.turnCount,
+      lastAction: s.activity.lastAction,
+      updatedAt: s.activity.updatedAt,
+    }));
+
     return {
       totalSessions: sessions.length,
       activeSessions,
@@ -267,6 +281,7 @@ export class SessionManager {
       errorSessions,
       totalCostUsd,
       byEngine,
+      sessions: sessionSummaries,
     };
   }
 
@@ -437,6 +452,7 @@ export class SessionManager {
       lastPromptPreview: null,
       lastResponsePreview: null,
       isRehydrated: false,
+      turnCount: 0,
     };
 
     syncSession(record);
@@ -655,6 +671,7 @@ export class SessionManager {
       lastPromptPreview: session.activity.lastPromptPreview,
       lastResponsePreview: session.activity.lastResponsePreview,
       isRehydrated: true,
+      turnCount: session.turnCount,
     };
 
     syncSession(record);

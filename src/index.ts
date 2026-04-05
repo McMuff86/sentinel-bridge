@@ -33,6 +33,7 @@ export type {
   SessionInfo,
   SessionOverview,
   SessionPhase,
+  SessionSummary,
   TurnUsage,
 } from './types.js';
 export type { SessionEvent, SessionEventType } from './sessions/session-events.js';
@@ -597,6 +598,7 @@ function serializeSession(session: {
     lastResponsePreview: string | null;
     isRehydrated: boolean;
   };
+  turnCount: number;
 }): Record<string, unknown> {
   return {
     id: session.id,
@@ -633,6 +635,7 @@ function serializeSession(session: {
       lastResponsePreview: session.activity.lastResponsePreview,
       isRehydrated: session.activity.isRehydrated,
     },
+    turnCount: session.turnCount,
   };
 }
 
@@ -682,6 +685,10 @@ function serializeOverview(overview: ReturnType<SessionManager['getOverview']>) 
         serializeEngineBreakdown(breakdown),
       ]),
     ),
+    sessions: overview.sessions.map((s) => ({
+      ...s,
+      updatedAt: s.updatedAt.toISOString(),
+    })),
   };
 }
 

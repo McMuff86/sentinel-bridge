@@ -141,6 +141,7 @@ export interface SessionInfo extends ISession {
   lastError?: string;
   routingTrace?: RoutingTrace;
   activity: SessionActivity;
+  turnCount: number;
 }
 
 export interface TurnUsage {
@@ -165,6 +166,18 @@ export interface EngineCostBreakdown {
   tokenCount: TokenUsage;
 }
 
+export interface SessionSummary {
+  name: string;
+  engine: EngineKind;
+  model: string;
+  status: SessionStatus;
+  phase: SessionPhase;
+  costUsd: number;
+  turnCount: number;
+  lastAction: SessionAction;
+  updatedAt: Date;
+}
+
 export interface SessionOverview {
   totalSessions: number;
   activeSessions: number;
@@ -173,6 +186,7 @@ export interface SessionOverview {
   errorSessions: number;
   totalCostUsd: number;
   byEngine: Record<EngineKind, EngineCostBreakdown>;
+  sessions: SessionSummary[];
 }
 
 export interface CostReport {

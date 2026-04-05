@@ -373,4 +373,70 @@ describe('SessionManager', () => {
       expect(longResult.session.activity.lastResponsePreview).toBe('y'.repeat(120) + '…');
     });
   });
+
+  describe('turnCount tracking', () => {
+    it('should start at 0 and increment on each sendMessage', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'turn-count' });
+      expect(manager.getSessionStatus('turn-count')!.turnCount).toBe(0);
+
+      const record = (manager as any).sessions.get('turn-count');
+      record.engineInstance.send = vi.fn().mockResolvedValue('ok');
+
+      const r1 = await manager.sendMessage('turn-count', 'one');
+      expect(r1.session.turnCount).toBe(1);
+
+      const r2 = await manager.sendMessage('turn-count', 'two');
+      expect(r2.session.turnCount).toBe(2);
+    });
+
+    it('should not increment turnCount on failed send', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'turn-fail' });
+      const record = (manager as any).sessions.get('turn-fail');
+      record.engineInstance.send = vi.fn().mockRejectedValue(new Error('fail'));
+
+      const spy = vi.spyOn(manager.events, 'appendEvent').mockImplementation(() => {});
+      await expect(manager.sendMessage('turn-fail', 'boom')).rejects.toThrow();
+      expect(manager.getSessionStatus('turn-fail')!.turnCount).toBe(0);
+      spy.mockRestore();
+    });
+  });
+
+  describe('overview with session summaries', () => {
+    it('should include per-session summaries in overview', async () => {
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+        codex: { model: 'gpt-5.4' },
+      });
+
+      await manager.startSession({ name: 'overview-a' });
+      await manager.startSession({ name: 'overview-b', engine: 'codex' });
+
+      const record = (manager as any).sessions.get('overview-a');
+      record.engineInstance.send = vi.fn().mockResolvedValue('ok');
+      await manager.sendMessage('overview-a', 'ping');
+
+      const overview = manager.getOverview();
+      expect(overview.sessions.length).toBeGreaterThanOrEqual(2);
+
+      const summaryA = overview.sessions.find((s: any) => s.name === 'overview-a')!;
+      expect(summaryA.engine).toBe('claude');
+      expect(summaryA.status).toBe('active');
+      expect(summaryA.turnCount).toBe(1);
+      expect(summaryA.phase).toBe('idle');
+      expect(summaryA.lastAction).toBe('send');
+      expect(summaryA.updatedAt).toBeInstanceOf(Date);
+
+      const summaryB = overview.sessions.find((s: any) => s.name === 'overview-b')!;
+      expect(summaryB.engine).toBe('codex');
+      expect(summaryB.turnCount).toBe(0);
+    });
+  });
 });

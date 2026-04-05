@@ -64,6 +64,7 @@ export function toSessionInfo(
       lastResponsePreview: record.lastResponsePreview,
       isRehydrated: record.isRehydrated,
     },
+    turnCount: record.turnCount,
   };
 }
 

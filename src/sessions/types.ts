@@ -19,4 +19,5 @@ export interface SessionRecord {
   lastPromptPreview: string | null;
   lastResponsePreview: string | null;
   isRehydrated: boolean;
+  turnCount: number;
 }
