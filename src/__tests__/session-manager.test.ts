@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const hoisted = vi.hoisted(() => {
   const claudeStart = vi.fn();
@@ -84,6 +84,10 @@ import { SessionManager } from '../session-manager.js';
 const { claudeStart, codexStart, grokStart } = hoisted;
 
 describe('SessionManager', () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     claudeStart.mockReset();
     codexStart.mockReset();
@@ -249,6 +253,27 @@ describe('SessionManager', () => {
       const session = manager.getSessionStatus('resume-test');
       expect(session?.engine).toBe('claude');
       expect(session?.routingTrace?.primary.engine).toBe('claude');
+    });
+  });
+
+  describe('expiry cleanup', () => {
+    it('should remove expired sessions from the persistent store', async () => {
+      const manager = new SessionManager({
+        ttlMs: 1,
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      await manager.startSession({ name: 'expiring-session' });
+      const storeDeleteSpy = vi.spyOn((manager as any).store, 'delete');
+      const record = (manager as any).sessions.get('expiring-session');
+      record.lastTouchedAt = Date.now() - 10;
+
+      manager.listSessions();
+
+      expect(storeDeleteSpy).toHaveBeenCalledWith('expiring-session');
+      expect(manager.getSessionStatus('expiring-session')).toBeUndefined();
+
+      await manager.shutdown();
     });
   });
 

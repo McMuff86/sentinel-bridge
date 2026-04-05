@@ -394,14 +394,7 @@ function buildTools(): ToolDef[] {
  */
 export function activate(api: PluginApi): void {
   const userConfig = (api.getConfig?.() ?? {}) as Partial<SentinelBridgeConfig>;
-  const config: SentinelBridgeConfig = {
-    ...DEFAULT_CONFIG,
-    ...userConfig,
-    engines: {
-      ...DEFAULT_CONFIG.engines,
-      ...userConfig.engines,
-    },
-  };
+  const config = mergePluginConfig(DEFAULT_CONFIG, userConfig);
   const ctx: PluginContext = {
     config,
     manager: new SessionManager(toSessionManagerConfig(config)),
@@ -468,6 +461,30 @@ export function activate(api: PluginApi): void {
   api.logger?.info(
     `[sentinel-bridge] activated with ${tools.length} registered tools.`,
   );
+}
+
+function mergePluginConfig(
+  defaults: SentinelBridgeConfig,
+  overrides: Partial<SentinelBridgeConfig>,
+): SentinelBridgeConfig {
+  return {
+    ...defaults,
+    ...overrides,
+    engines: {
+      claude: {
+        ...defaults.engines?.claude,
+        ...overrides.engines?.claude,
+      },
+      codex: {
+        ...defaults.engines?.codex,
+        ...overrides.engines?.codex,
+      },
+      grok: {
+        ...defaults.engines?.grok,
+        ...overrides.engines?.grok,
+      },
+    },
+  };
 }
 
 function readRequiredString(

@@ -46,6 +46,35 @@ describe('activate', () => {
     );
   });
 
+  it('deep-merges per-engine config so defaults survive partial overrides', () => {
+    const mockApi = {
+      registerTool: vi.fn(),
+      registerCliBackend: vi.fn(),
+      getConfig: vi.fn(() => ({
+        engines: {
+          claude: {
+            command: '/custom/claude',
+          },
+        },
+      })),
+    };
+
+    activate(mockApi);
+
+    expect(mockApi.registerCliBackend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'sentinel-claude',
+        command: '/custom/claude',
+      })
+    );
+    expect(mockApi.registerCliBackend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'sentinel-codex',
+        command: 'codex',
+      })
+    );
+  });
+
   it('tool execute wrappers return valid responses', async () => {
     const tools: Record<string, (id: string, params: Record<string, unknown>) => Promise<{ content: { type: 'text'; text: string }[]; details?: Record<string, unknown> }>> = {};
     const mockApi = {

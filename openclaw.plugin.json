@@ -89,7 +89,8 @@
       "sb_engine_status",
       "sb_model_route",
       "sb_cost_report",
-      "sb_compact"
+      "sb_compact",
+      "sb_session_events"
     ],
     "exports": {
       "activate": "activate"

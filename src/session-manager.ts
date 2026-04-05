@@ -561,7 +561,11 @@ export class SessionManager {
 
   private cleanupExpiredSessions(): void {
     const ttlMs = this.config.ttlMs ?? DEFAULT_TTL_MS;
-    cleanupExpiredSessions(this.sessions, ttlMs);
+    const expiredSessionNames = cleanupExpiredSessions(this.sessions, ttlMs);
+
+    for (const name of expiredSessionNames) {
+      this.store.delete(name);
+    }
   }
 
   private enforceConcurrentSessionLimit(): void {
