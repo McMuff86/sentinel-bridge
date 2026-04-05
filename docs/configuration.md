@@ -81,10 +81,10 @@ Aliases, prefixes (`claude/...`), and fallback behaviour are documented in [API-
 
 | Variable | Used by |
 |----------|---------|
-| `OPENAI_API_KEY` | Codex CLI (if not set in `engines.codex.env`) |
+| `OPENAI_API_KEY` | Codex CLI (optional env-backed auth if not using existing CLI login) |
 | `XAI_API_KEY` | Grok (if `apiKey` not set) |
 
-Claude uses **CLI subscription auth** (`claude login`); no API key in config.
+Claude uses CLI auth (`claude login`). Codex can use existing CLI auth and may also honor env-backed auth depending on host setup.
 
 ## Live testing
 

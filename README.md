@@ -1,6 +1,6 @@
 # sentinel-bridge
 
-**Multi-engine coding agent for OpenClaw — route through Claude Code, Codex, and Grok.**
+**Multi-engine routing and session orchestration for OpenClaw — Claude, Codex, and Grok behind one bridge.**
 
 [![npm version](https://img.shields.io/npm/v/sentinel-bridge)](https://www.npmjs.com/package/sentinel-bridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -10,19 +10,24 @@
 
 ## Why?
 
-As of April 2026, Anthropic bills third-party harness usage of Claude models separately — even if you already have a Claude Pro or Max subscription. Your existing plan only covers Anthropic's own tools.
+OpenClaw is increasingly multi-provider and multi-runtime. What stays valuable is not a one-off billing workaround, but a thin layer that can:
 
-**Claude Code CLI**, however, remains fully covered by the subscription. sentinel-bridge exploits this: it routes OpenClaw requests _through_ Claude Code CLI, so your subscription covers the usage. Zero additional cost.
+- route sessions to the right engine,
+- preserve continuity across turns,
+- fail over when an engine is unavailable,
+- keep provider-specific quirks out of higher-level orchestration.
+
+`sentinel-bridge` exists to make that layer explicit.
 
 ## What It Does
 
-sentinel-bridge is an OpenClaw plugin that exposes three coding agent engines through a unified interface:
+sentinel-bridge is an OpenClaw plugin that exposes three coding agent engines through one interface:
 
-- **Claude Code CLI** — subscription-covered, zero extra cost
-- **OpenAI Codex CLI** — full Codex integration with working directory persistence
-- **xAI Grok API** — Grok models via HTTP
+- **Claude Code CLI** — CLI-backed Claude sessions
+- **OpenAI Codex CLI** — Codex sessions with working-directory continuity
+- **xAI Grok API** — HTTP-backed Grok sessions
 
-All engines look the same to OpenClaw. Start sessions, send messages, switch models, track costs — one API for everything.
+All engines look the same to OpenClaw. Start sessions, send messages, switch models, route requests, and inspect session state through one API.
 
 ## Quick Start
 
@@ -76,21 +81,20 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 
 ## Features
 
-- **Subscription passthrough** — Claude usage via CLI costs $0 beyond your existing plan (when the CLI is authenticated)
 - **Multi-engine sessions** — Claude, Codex, and Grok through one interface
-- **Session persistence** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
-- **Cost tracking** — per-session, per-engine breakdowns (informational)
-- **Start fallback chain** — if the primary engine’s `start()` fails, retry other engines (`defaultFallbackChain`); see [configuration.md](docs/configuration.md)
-- **Model aliases** — e.g. `opus`, `sonnet`, `codex` → resolved model ids
-- **11 tools** in the `sb_*` namespace — session lifecycle, engines, routing, cost, compact
+- **Routing layer** — model aliases, engine inference, and configurable start fallback chains
+- **Session continuity** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
+- **Observability** — per-session status, routing info, token usage, and cost tracking
+- **Plugin surface** — `sb_*` tools for session lifecycle, engines, routing, cost, and compact
+- **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
 ## Engines
 
 | Engine | Transport | Auth | Cost | Status |
 |--------|-----------|------|------|--------|
-| **Claude** | CLI subprocess (stream-json) | Subscription OAuth | $0 (subscription-covered) | ✅ Implemented |
-| **Codex** | CLI per-message (quiet mode) | `OPENAI_API_KEY` | Standard OpenAI pricing | ✅ Implemented |
-| **Grok** | HTTP API (OpenAI-compatible) | `XAI_API_KEY` | Standard xAI pricing | ✅ Implemented |
+| **Claude** | CLI subprocess (stream-json) | CLI auth | Informational tracking | ✅ Implemented |
+| **Codex** | CLI per-message (quiet mode) | Codex/OpenAI CLI auth or env-backed auth | Informational tracking | ✅ Implemented |
+| **Grok** | HTTP API (OpenAI-compatible) | `XAI_API_KEY` | Informational tracking | ✅ Implemented |
 
 ### Supported Models
 
@@ -140,44 +144,17 @@ Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`eng
 
 Full reference: [docs/configuration.md](docs/configuration.md).
 
-## Migration Guide
+## Integration Direction
 
-Moving from direct Anthropic API usage to sentinel-bridge:
+The durable value of sentinel-bridge is **not** “subscription bypass.”
+It is:
 
-**Before** (direct API — billed separately):
-```jsonc
-{
-  "model": "anthropic/claude-opus-4-6"
-}
-```
+- a stable routing layer,
+- provider adapters with one common interface,
+- explicit fallback behaviour,
+- session continuity across heterogeneous engines.
 
-**After** (routed through Claude Code CLI — subscription-covered):
-```bash
-# 1. Install
-npm install sentinel-bridge
-
-# 2. Ensure Claude CLI is authenticated
-claude login
-
-# 3. Configure OpenClaw
-openclaw plugins install sentinel-bridge
-```
-
-```jsonc
-{
-  "plugins": {
-    "sentinel-bridge": {
-      "defaultEngine": "claude",
-      "defaultModel": "claude/opus",
-      "engines": {
-        "claude": { "defaultModel": "claude-opus-4-6" }
-      }
-    }
-  }
-}
-```
-
-Your requests now go through the CLI. Same models, same quality, zero additional billing.
+That makes it useful even when OpenClaw itself gains stronger native provider support.
 
 ## Tools
 

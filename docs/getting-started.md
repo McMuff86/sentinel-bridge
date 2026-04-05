@@ -17,8 +17,10 @@ claude login
 ```
 This stores an OAuth token in `~/.claude/`. Your Claude Pro/Max subscription covers all usage through the CLI.
 
-**Codex** (API key):
+**Codex** (CLI auth or env-backed auth):
 ```bash
+# if your Codex CLI is already authenticated, that's enough
+# optional env-backed auth:
 export OPENAI_API_KEY="sk-..."
 ```
 
@@ -92,7 +94,7 @@ sb_session_send { "name": "my-session", "message": "List all TypeScript files in
 sb_session_status { "name": "my-session" }
 ```
 
-Shows token usage, cost (marked as subscription-covered for Claude), and session state.
+Shows token usage, tracked cost metadata, and session state.
 
 ### 5. Stop when done
 

@@ -2,26 +2,29 @@
 
 ## Problem Statement
 
-**Effective April 4, 2026**, Anthropic bills third-party harness usage of Claude models separately from existing subscriptions. Users who interact with Claude through external tools (OpenClaw, Cursor, etc.) will incur additional API costs even when they already hold a Claude Pro/Max subscription.
+OpenClaw increasingly spans multiple providers, auth modes, and runtime styles. The missing piece is a thin layer that can route work across heterogeneous engines without leaking provider-specific quirks into higher-level orchestration.
 
-However, **Claude Code CLI** — Anthropic's own terminal agent — remains fully covered by the subscription. A Claude Max subscriber can run unlimited Claude Code sessions at no extra charge.
+The hard problem is not just “call model X.” It is:
 
-This creates a clear arbitrage opportunity: if an orchestration layer routes its requests _through_ Claude Code CLI instead of hitting the Anthropic API directly, the subscription covers the usage and no additional billing applies.
+- choosing the right engine,
+- preserving session continuity,
+- failing over cleanly,
+- normalizing state, usage, and routing behaviour.
 
 ## Solution: Multi-Engine Provider Plugin
 
 **sentinel-bridge** is an OpenClaw plugin that exposes Claude Code CLI, OpenAI Codex CLI, and Grok API as first-class engine providers. It:
 
-1. **Routes OpenClaw requests through Claude Code CLI** — leveraging subscription auth so Claude usage costs zero extra.
-2. **Wraps Codex CLI** — full OpenAI Codex integration with session persistence via working directory state.
-3. **Wraps Grok API** — xAI's Grok models as an additional engine option.
-4. **Provides a unified IEngine interface** — all engines look the same to OpenClaw's session management.
-5. **Tracks cost** — per-session and per-engine cost breakdown, even when the actual billing is $0 (subscription).
+1. **Wraps provider-specific engines behind a common interface.**
+2. **Applies routing and fallback policy above individual engines.**
+3. **Preserves session continuity** via engine-specific resume/state strategies.
+4. **Provides a unified IEngine interface** so higher-level orchestration stays provider-agnostic.
+5. **Tracks usage and cost metadata** for observability.
 
 ## User Stories
 
-### US-1: Zero-Cost Claude Usage
-> As an OpenClaw user with a Claude Max subscription, I want my coding agent requests routed through Claude Code CLI so that I pay nothing beyond my existing subscription.
+### US-1: Durable Routing
+> As an OpenClaw user, I want my coding agent sessions routed to the right engine so that auth, capability, or runtime differences do not block my work.
 
 ### US-2: Multi-Engine Selection
 > As a power user, I want to choose between Claude, Codex, and Grok engines per session so that I can pick the best model for each task.
@@ -50,7 +53,7 @@ This creates a clear arbitrage opportunity: if an orchestration layer routes its
 
 | Metric | Target |
 |--------|--------|
-| Claude requests via subscription (not billed separately) | 100% when Claude Code CLI is available |
+| Session start fallback works when the primary engine is unavailable | 100% in covered test scenarios |
 | Session start latency | < 3s for Claude, < 5s for Codex/Grok |
 | Session message round-trip (excluding model thinking) | < 2s overhead |
 | Engine fallback success rate | > 95% when fallback engine is configured |

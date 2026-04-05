@@ -6,8 +6,8 @@ export const PLUGIN_META = {
   name: 'sentinel-bridge',
   version: '0.1.0',
   description:
-    'Multi-engine provider bridge for Claude Code, Codex & Grok. ' +
-    'Route OpenClaw through your existing subscriptions.',
+    'Multi-engine routing and session bridge for Claude Code, Codex & Grok. ' +
+    'Unify provider adapters, routing, and session continuity for OpenClaw.',
   author: 'Adrian Muff',
   license: 'MIT',
   homepage: 'https://github.com/McMuff86/sentinel-bridge',

@@ -95,7 +95,7 @@ interface IEngine extends EventEmitter {
 
 **Transport:** Spawns `claude` CLI as a child process with `--output-format stream-json` and `--input-format stream-json`. Communication is line-delimited JSON over stdin/stdout.
 
-**Auth flow:** Claude Code CLI uses the user's existing Anthropic subscription credentials (OAuth token stored by `claude login`). No API key needed. All usage is covered by the subscription — this is the core cost-saving mechanism.
+**Auth flow:** Claude Code CLI uses the user's existing CLI credentials (typically via `claude login`). No API key is required in sentinel-bridge config.
 
 **Key behaviors:**
 - Long-running subprocess (persistent session)
@@ -116,7 +116,7 @@ stop()  → SIGTERM → wait for exit → cleanup
 
 **Transport:** Spawns `codex` CLI per-message (not persistent process). Each `send()` creates a new `codex` process in quiet + full-auto mode. Session persistence is achieved through the shared working directory.
 
-**Auth flow:** Uses `OPENAI_API_KEY` environment variable. Standard OpenAI API billing applies.
+**Auth flow:** Uses Codex CLI authentication and may also honor env-backed auth such as `OPENAI_API_KEY`, depending on host setup.
 
 **Key behaviors:**
 - One-shot process per message (no persistent subprocess)
@@ -295,7 +295,7 @@ Maintained as a runtime-mutable map with known defaults. Users can override via 
 | grok-3 | $3.00 | $15.00 | — |
 | grok-3-mini | $0.30 | $0.50 | — |
 
-**Note:** Claude costs are tracked for visibility but marked `subscriptionCovered: true` when using Claude Code CLI auth. Actual billing is $0.
+**Note:** Costs in sentinel-bridge are tracking metadata for observability. Real billing depends on the backing engine/account configuration on the host.
 
 ### Aggregation
 
