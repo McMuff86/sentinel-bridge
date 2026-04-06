@@ -471,19 +471,25 @@ function mergePluginConfig(
     ...defaults,
     ...overrides,
     engines: {
-      claude: {
-        ...defaults.engines?.claude,
-        ...overrides.engines?.claude,
-      },
-      codex: {
-        ...defaults.engines?.codex,
-        ...overrides.engines?.codex,
-      },
-      grok: {
-        ...defaults.engines?.grok,
-        ...overrides.engines?.grok,
-      },
+      claude: mergeEnginePluginConfig(defaults.engines?.claude, overrides.engines?.claude),
+      codex: mergeEnginePluginConfig(defaults.engines?.codex, overrides.engines?.codex),
+      grok: mergeEnginePluginConfig(defaults.engines?.grok, overrides.engines?.grok),
     },
+  };
+}
+
+function mergeEnginePluginConfig(
+  base?: PluginEngineConfig,
+  override?: PluginEngineConfig,
+): PluginEngineConfig {
+  if (!override) return { ...base };
+  if (!base) return { ...override };
+  return {
+    ...base,
+    ...override,
+    env: base.env || override.env
+      ? { ...base.env, ...override.env }
+      : undefined,
   };
 }
 

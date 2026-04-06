@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { EngineKind, SessionInfo } from '../types.js';
@@ -60,13 +60,30 @@ export class SessionStore {
       }
       return parsed;
     } catch {
+      // Main file missing or corrupt — try recovering from incomplete atomic write
+      const tmpPath = this.path + '.tmp';
+      if (existsSync(tmpPath)) {
+        try {
+          const raw = readFileSync(tmpPath, 'utf8');
+          const parsed = JSON.parse(raw) as SessionStoreData;
+          if (parsed?.version === 1 && typeof parsed.sessions === 'object') {
+            // Recover: promote temp file to main
+            renameSync(tmpPath, this.path);
+            return parsed;
+          }
+        } catch {
+          // Temp file also corrupt — start fresh
+        }
+      }
       return { version: 1, sessions: {} };
     }
   }
 
   save(data: SessionStoreData): void {
     mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(data, null, 2) + '\n', 'utf8');
+    const tmpPath = this.path + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+    renameSync(tmpPath, this.path);
   }
 
   upsert(session: SessionInfo): void {

@@ -47,6 +47,18 @@ const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_CONCURRENT_SESSIONS = 8;
 
+const SESSION_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9 _-]{0,63}$/;
+
+export function validateSessionName(name: string): void {
+  if (!SESSION_NAME_REGEX.test(name)) {
+    throw new Error(
+      `Invalid session name "${name}". ` +
+      'Must be 1-64 characters: letters, digits, spaces, hyphens, underscores. ' +
+      'Must start with a letter or digit.',
+    );
+  }
+}
+
 export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly config: SentinelBridgeConfig;
@@ -134,6 +146,7 @@ export class SessionManager {
   }
 
   async sendMessage(name: string, message: string): Promise<SendMessageResult> {
+    validateSessionName(name);
     const record = this.requireSession(name);
     const prevCost = record.session.costUsd;
     const prevTokens = { ...record.session.tokenCount };
@@ -185,6 +198,7 @@ export class SessionManager {
   }
 
   async stopSession(name: string): Promise<void> {
+    validateSessionName(name);
     await this.stop(name);
   }
 
@@ -338,6 +352,7 @@ export class SessionManager {
     name: string,
     summary?: string,
   ): Promise<SendMessageResult> {
+    validateSessionName(name);
     this.cleanupExpiredSessions();
 
     const record = this.requireSession(name);
@@ -399,10 +414,7 @@ export class SessionManager {
     config: Partial<EngineConfig> = {},
   ): Promise<ISession> {
     this.cleanupExpiredSessions();
-
-    if (!name.trim()) {
-      throw new Error('Session name is required.');
-    }
+    validateSessionName(name);
 
     const existing = this.sessions.get(name);
     if (existing?.session.status === 'active') {
@@ -561,10 +573,22 @@ export class SessionManager {
 
   private cleanupExpiredSessions(): void {
     const ttlMs = this.config.ttlMs ?? DEFAULT_TTL_MS;
-    const expiredSessionNames = cleanupExpiredSessions(this.sessions, ttlMs);
+    const now = Date.now();
 
+    // Clean up in-memory sessions
+    const expiredSessionNames = cleanupExpiredSessions(this.sessions, ttlMs, now);
     for (const name of expiredSessionNames) {
       this.store.delete(name);
+    }
+
+    // Clean up persisted sessions that expired while plugin was offline
+    const persisted = this.store.list();
+    for (const session of persisted) {
+      if (this.sessions.has(session.name)) continue;
+      if (now - session.lastTouchedAt.getTime() >= ttlMs) {
+        this.store.delete(session.name);
+        this.events.clearEvents(session.name);
+      }
     }
   }
 
