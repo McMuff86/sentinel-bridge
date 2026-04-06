@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { EngineKind } from '../types.js';
@@ -32,17 +32,22 @@ function sanitiseFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
+const MAX_EVENTS_PER_SESSION = 1000;
+
 export class SessionEventStore {
   private readonly dir: string;
+  private readonly maxEvents: number;
 
-  constructor(dir = getDefaultEventsDir()) {
+  constructor(dir = getDefaultEventsDir(), maxEvents = MAX_EVENTS_PER_SESSION) {
     this.dir = dir;
+    this.maxEvents = maxEvents;
   }
 
   appendEvent(event: SessionEvent): void {
     const filePath = this.pathFor(event.sessionName);
     mkdirSync(dirname(filePath), { recursive: true });
     appendFileSync(filePath, JSON.stringify(event) + '\n', 'utf8');
+    this.pruneIfNeeded(filePath);
   }
 
   listEvents(name: string, limit = 20): SessionEvent[] {
@@ -57,7 +62,15 @@ export class SessionEventStore {
     }
 
     const tail = limit > 0 ? lines.slice(-limit) : lines;
-    return tail.map((line) => JSON.parse(line) as SessionEvent);
+    const events: SessionEvent[] = [];
+    for (const line of tail) {
+      try {
+        events.push(JSON.parse(line) as SessionEvent);
+      } catch {
+        // Skip malformed JSONL lines rather than crashing
+      }
+    }
+    return events;
   }
 
   clearEvents(name: string): void {
@@ -66,5 +79,20 @@ export class SessionEventStore {
 
   private pathFor(name: string): string {
     return join(this.dir, `${sanitiseFileName(name)}.jsonl`);
+  }
+
+  private pruneIfNeeded(filePath: string): void {
+    if (this.maxEvents <= 0) return;
+    try {
+      const lines = readFileSync(filePath, 'utf8')
+        .split('\n')
+        .filter(Boolean);
+      if (lines.length > this.maxEvents) {
+        const kept = lines.slice(-this.maxEvents);
+        writeFileSync(filePath, kept.join('\n') + '\n', 'utf8');
+      }
+    } catch {
+      // Best-effort pruning — don't fail the append
+    }
   }
 }

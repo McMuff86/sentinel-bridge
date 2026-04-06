@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -102,5 +102,35 @@ describe('SessionEventStore', () => {
     const events = store.listEvents(name);
     expect(events).toHaveLength(1);
     expect(events[0]!.sessionName).toBe(name);
+  });
+
+  it('skips malformed JSONL lines without crashing', () => {
+    // Write a valid event, then a corrupt line, then another valid event
+    store.appendEvent(makeEvent({ type: 'session_started' }));
+
+    const filePath = join(dir, 'test-session.jsonl');
+    appendFileSync(filePath, 'NOT VALID JSON\n', 'utf8');
+
+    store.appendEvent(makeEvent({ type: 'session_stopped' }));
+
+    const events = store.listEvents('test-session');
+    expect(events).toHaveLength(2);
+    expect(events[0]!.type).toBe('session_started');
+    expect(events[1]!.type).toBe('session_stopped');
+  });
+
+  it('prunes events beyond maxEvents limit', () => {
+    const smallStore = new SessionEventStore(dir, 5);
+
+    for (let i = 0; i < 10; i++) {
+      smallStore.appendEvent(
+        makeEvent({ type: 'message_sent', preview: `msg-${i}` }),
+      );
+    }
+
+    const events = smallStore.listEvents('test-session', 100);
+    expect(events.length).toBeLessThanOrEqual(5);
+    // Should keep the latest events
+    expect(events[events.length - 1]!.preview).toBe('msg-9');
   });
 });
