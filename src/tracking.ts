@@ -469,6 +469,7 @@ function createEmptyEngineCosts(): Record<EngineKind, number> {
     claude: 0,
     codex: 0,
     grok: 0,
+    ollama: 0,
   };
 }
 

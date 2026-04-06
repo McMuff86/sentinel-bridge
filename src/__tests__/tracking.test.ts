@@ -264,6 +264,7 @@ describe('UsageTracker', () => {
         claude: 0.43,
         codex: 0,
         grok: 0,
+        ollama: 0,
       },
     });
   });

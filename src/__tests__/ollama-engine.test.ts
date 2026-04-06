@@ -22,6 +22,28 @@ describe('OllamaEngine', () => {
     } as unknown as Response;
   }
 
+  function createSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    });
+  }
+
+  function mockStreamResponse(sseLines: string[]) {
+    const body = createSSEStream(sseLines.map((l) => l + '\n'));
+    return {
+      ok: true,
+      status: 200,
+      body,
+      headers: new Headers(),
+    } as unknown as Response;
+  }
+
   it('validates model is required on start', async () => {
     const engine = new OllamaEngine({ model: '' });
     await expect(engine.start()).rejects.toThrow(/model is required/i);
@@ -53,9 +75,7 @@ describe('OllamaEngine', () => {
   });
 
   it('sends a message and returns assistant content', async () => {
-    // start() health check
     fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
-    // send() chat completion
     fetchSpy.mockResolvedValueOnce(
       mockFetchResponse({
         choices: [{ message: { role: 'assistant', content: 'Hello from Ollama!' } }],
@@ -70,7 +90,7 @@ describe('OllamaEngine', () => {
     expect(response).toBe('Hello from Ollama!');
     expect(engine.status().usage.tokenCount.input).toBe(10);
     expect(engine.status().usage.tokenCount.output).toBe(5);
-    expect(engine.status().usage.costUsd).toBe(0); // always free
+    expect(engine.status().usage.costUsd).toBe(0);
   });
 
   it('throws with model not found hint on 404', async () => {
@@ -97,6 +117,12 @@ describe('OllamaEngine', () => {
     fetchSpy.mockResolvedValueOnce(
       mockFetchResponse({ error: 'internal error' }, 500),
     );
+    fetchSpy.mockResolvedValueOnce(
+      mockFetchResponse({ error: 'internal error' }, 500),
+    );
+    fetchSpy.mockResolvedValueOnce(
+      mockFetchResponse({ error: 'internal error' }, 500),
+    );
 
     const engine = new OllamaEngine({ model: 'llama3.2' });
     await engine.start();
@@ -116,7 +142,6 @@ describe('OllamaEngine', () => {
     const engine = new OllamaEngine({ model: 'llama3.2' });
     await engine.start();
 
-    // Don't resolve the send fetch — simulate in-flight
     let rejectFn!: (reason: unknown) => void;
     fetchSpy.mockImplementationOnce(
       () => new Promise((_resolve, reject) => { rejectFn = reject; }),
@@ -125,7 +150,6 @@ describe('OllamaEngine', () => {
     const sendPromise = engine.send('test').catch((e) => e);
     engine.cancel();
 
-    // The abort should cause the fetch to reject
     rejectFn(new DOMException('Aborted', 'AbortError'));
     const error = await sendPromise;
     expect(error).toBeInstanceOf(EngineError);
@@ -150,11 +174,10 @@ describe('OllamaEngine', () => {
     await engine.send('msg1');
     await engine.send('msg2');
 
-    // Verify second call includes history
     const secondCallBody = JSON.parse(
       (fetchSpy.mock.calls[2]![1] as { body: string }).body,
     );
-    expect(secondCallBody.messages).toHaveLength(3); // user1, assistant1, user2
+    expect(secondCallBody.messages).toHaveLength(3);
     expect(secondCallBody.messages[0].content).toBe('msg1');
     expect(secondCallBody.messages[1].content).toBe('First');
     expect(secondCallBody.messages[2].content).toBe('msg2');
@@ -179,5 +202,199 @@ describe('OllamaEngine', () => {
 
     await engine.start();
     expect(engine.getSessionId()).toBeTruthy();
+  });
+
+  describe('streaming', () => {
+    it('streams chunks via onChunk callback when provided', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+
+      const sseLines = [
+        'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+        'data: {"choices":[{"delta":{"content":" world"}}]}',
+        'data: {"choices":[{"delta":{"content":"!"}}],"usage":{"prompt_tokens":5,"completion_tokens":3}}',
+        'data: [DONE]',
+      ];
+      fetchSpy.mockResolvedValueOnce(mockStreamResponse(sseLines));
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+
+      const chunks: string[] = [];
+      const response = await engine.send('Hi', (chunk) => chunks.push(chunk));
+
+      expect(response).toBe('Hello world!');
+      expect(chunks).toEqual(['Hello', ' world', '!']);
+      expect(engine.status().usage.tokenCount.input).toBe(5);
+      expect(engine.status().usage.tokenCount.output).toBe(3);
+    });
+
+    it('sends stream=true in request body when onChunk is provided', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+
+      const sseLines = [
+        'data: {"choices":[{"delta":{"content":"ok"}}]}',
+        'data: [DONE]',
+      ];
+      fetchSpy.mockResolvedValueOnce(mockStreamResponse(sseLines));
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+      await engine.send('test', () => {});
+
+      const requestBody = JSON.parse(
+        (fetchSpy.mock.calls[1]![1] as { body: string }).body,
+      );
+      expect(requestBody.stream).toBe(true);
+    });
+
+    it('sends stream=false in request body when no onChunk', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({
+          choices: [{ message: { role: 'assistant', content: 'ok' } }],
+        }),
+      );
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+      await engine.send('test');
+
+      const requestBody = JSON.parse(
+        (fetchSpy.mock.calls[1]![1] as { body: string }).body,
+      );
+      expect(requestBody.stream).toBe(false);
+    });
+
+    it('handles empty delta content gracefully', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+
+      const sseLines = [
+        'data: {"choices":[{"delta":{"role":"assistant"}}]}',
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        'data: {"choices":[{"delta":{}}]}',
+        'data: [DONE]',
+      ];
+      fetchSpy.mockResolvedValueOnce(mockStreamResponse(sseLines));
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+
+      const chunks: string[] = [];
+      const response = await engine.send('test', (chunk) => chunks.push(chunk));
+
+      expect(response).toBe('Hi');
+      expect(chunks).toEqual(['Hi']);
+    });
+  });
+
+  describe('retry', () => {
+    it('retries on transient 500 errors and succeeds', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'server overloaded' }, 500),
+      );
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({
+          choices: [{ message: { role: 'assistant', content: 'recovered' } }],
+          usage: { prompt_tokens: 8, completion_tokens: 2 },
+        }),
+      );
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+      const response = await engine.send('test');
+
+      expect(response).toBe('recovered');
+    });
+
+    it('does not retry on non-retriable errors (404)', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'not found' }, 404),
+      );
+
+      const engine = new OllamaEngine({ model: 'nonexistent' });
+      await engine.start();
+
+      try {
+        await engine.send('test');
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(EngineError);
+        expect((error as EngineError).category).toBe('unavailable');
+      }
+
+      // health check + 1 send attempt = 2 fetch calls total (no retry)
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('exhausts retries and throws the last error', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: 'err' }, 500));
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: 'err' }, 500));
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({ error: 'err' }, 500));
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+
+      try {
+        await engine.send('test');
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(EngineError);
+        expect((error as EngineError).category).toBe('transient');
+      }
+
+      // health check + 3 attempts (1 initial + 2 retries) = 4
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  describe('context overflow', () => {
+    it('classifies context overflow error as context_overflow', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'context length exceeded, too long' }, 400),
+      );
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+
+      try {
+        await engine.send('very long message');
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(EngineError);
+        expect((error as EngineError).category).toBe('context_overflow');
+        expect((error as EngineError).message).toContain('compact');
+      }
+    });
+  });
+
+  describe('rate limiting', () => {
+    it('classifies 429 as rate_limited', async () => {
+      fetchSpy.mockResolvedValueOnce(mockFetchResponse({}, 200));
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'too many requests' }, 429),
+      );
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'too many requests' }, 429),
+      );
+      fetchSpy.mockResolvedValueOnce(
+        mockFetchResponse({ error: 'too many requests' }, 429),
+      );
+
+      const engine = new OllamaEngine({ model: 'llama3.2' });
+      await engine.start();
+
+      try {
+        await engine.send('test');
+        expect.unreachable('should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(EngineError);
+        expect((error as EngineError).category).toBe('rate_limited');
+      }
+    });
   });
 });

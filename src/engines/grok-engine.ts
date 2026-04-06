@@ -83,7 +83,7 @@ export class GrokEngine implements IEngine {
     this.state = "running";
   }
 
-  async send(message: string): Promise<string> {
+  async send(message: string, _onChunk?: (chunk: string) => void): Promise<string> {
     if (!message.trim()) {
       return "";
     }

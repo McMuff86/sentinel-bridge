@@ -8,6 +8,7 @@
 | **OpenClaw** | Latest | Plugin host |
 | **Claude Code CLI** | Latest | For Claude engine — `npm install -g @anthropic-ai/claude-code` |
 | **Codex CLI** | Latest | For Codex engine (optional) — `npm install -g @openai/codex` |
+| **Ollama** | Latest | For Ollama engine (optional) — [ollama.com](https://ollama.com) |
 
 ### Auth Setup
 
@@ -27,6 +28,13 @@ export OPENAI_API_KEY="sk-..."
 **Grok** (API key):
 ```bash
 export XAI_API_KEY="xai-..."
+```
+
+**Ollama** (no auth needed — local):
+```bash
+# Install Ollama from https://ollama.com
+# Pull a model:
+ollama pull llama3.2
 ```
 
 You only need auth for the engines you plan to use. Claude alone is enough to get started.
@@ -186,6 +194,24 @@ Sessions have a configurable TTL (default: 7 days). Idle sessions are cleaned up
     }
   }
 }
+```
+
+### "Ollama is not reachable"
+
+Ensure Ollama is running locally:
+```bash
+ollama serve
+# or check if it's already running:
+curl http://localhost:11434
+```
+
+### "Ollama model not found"
+
+The model needs to be pulled first:
+```bash
+ollama pull llama3.2
+# or any other model:
+ollama pull deepseek-r1
 ```
 
 ### Cost report shows $0 for Claude

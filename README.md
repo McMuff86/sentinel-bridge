@@ -1,6 +1,6 @@
 # sentinel-bridge
 
-**Multi-engine routing and session orchestration for OpenClaw — Claude, Codex, and Grok behind one bridge.**
+**Multi-engine routing and session orchestration for OpenClaw — Claude, Codex, Grok, and Ollama behind one bridge.**
 
 [![npm version](https://img.shields.io/npm/v/sentinel-bridge)](https://www.npmjs.com/package/sentinel-bridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -21,11 +21,12 @@ OpenClaw is increasingly multi-provider and multi-runtime. What stays valuable i
 
 ## What It Does
 
-sentinel-bridge is an OpenClaw plugin that exposes three coding agent engines through one interface:
+sentinel-bridge is an OpenClaw plugin that exposes four coding agent engines through one interface:
 
 - **Claude Code CLI** — CLI-backed Claude sessions
 - **OpenAI Codex CLI** — Codex sessions with working-directory continuity
 - **xAI Grok API** — HTTP-backed Grok sessions
+- **Ollama** — Local LLM inference with streaming support (no API key required)
 
 All engines look the same to OpenClaw. Start sessions, send messages, switch models, route requests, and inspect session state through one API.
 
@@ -69,8 +70,8 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 │  │                                                   │  │
 │  │            ┌── IEngine Interface ──┐              │  │
 │  │            │                       │              │  │
-│  │     Claude Engine   Codex Engine   Grok Engine    │  │
-│  │            │            │          │ (retry)      │  │
+│  │  Claude Engine  Codex Engine  Grok Engine  Ollama │  │
+│  │        │           │         │ (retry)    │(SSE) │  │
 │  │                                                   │  │
 │  │  ┌─────────────────────────────────────────────┐  │  │
 │  │  │  SessionStore   EventStore   StructuredLog  │  │  │
@@ -78,19 +79,20 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 │  │  └─────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                        │
-└────────────┬───────────┬───────────┬──────────────────┘
-             │           │           │
-      claude CLI    codex CLI   xAI HTTP API
-     (subscription)  (API key)    (API key)
+└────────────┬───────────┬───────────┬──────────┬───────┘
+             │           │           │          │
+      claude CLI    codex CLI   xAI HTTP   Ollama HTTP
+     (subscription)  (subscription)  (API key)    (local)
 ```
 
 ## Features
 
-- **Multi-engine sessions** — Claude, Codex, and Grok through one interface
+- **Multi-engine sessions** — Claude, Codex, Grok, and Ollama through one interface
 - **Routing layer** — model aliases, engine inference, light capability-based primary selection, configurable start fallback chains, and routing trace metadata
 - **Session continuity** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
 - **Error categorization** — typed `EngineError` with categories (`rate_limited`, `timeout`, `unavailable`, `auth_expired`, etc.) and `retriable` flag for intelligent fallback decisions
 - **Grok retry** — exponential backoff (up to 3 retries) for rate-limited and transient errors, respects `Retry-After`
+- **Ollama streaming** — SSE streaming with `onChunk` callback for incremental output; retry with exponential backoff (up to 2 retries)
 - **Session cancel** — abort in-flight operations without destroying the session
 - **Concurrency safety** — per-session mutex serialises send/stop/compact; rehydration deduplication
 - **Persistence** — sessions survive plugin restarts via atomic JSON store writes; JSONL event timeline per session
@@ -106,6 +108,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 | **Claude** | CLI subprocess (stream-json) | CLI auth | Informational tracking | ✅ Implemented |
 | **Codex** | CLI per-message (quiet mode) | Codex/OpenAI CLI auth or env-backed auth | Informational tracking | ✅ Implemented |
 | **Grok** | HTTP API (OpenAI-compatible) | `XAI_API_KEY` | Informational tracking | ✅ Implemented |
+| **Ollama** | HTTP API (OpenAI-compatible, SSE streaming) | None (local) | $0 (local inference) | ✅ Implemented |
 
 ### Supported Models
 
@@ -118,12 +121,17 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 | o4-mini | — | Codex | $1.25 | $10.00 |
 | grok-4-1-fast | `grok-fast` | Grok | $0.20 | $0.50 |
 | grok-3 | `grok-3` | Grok | $3.00 | $15.00 |
+| llama3.2 | `llama3` | Ollama | $0 | $0 |
+| mistral | `mistral` | Ollama | $0 | $0 |
+| deepseek-r1 | `deepseek` | Ollama | $0 | $0 |
+| qwen2.5-coder | `qwen` | Ollama | $0 | $0 |
+| gemma3 | `gemma` | Ollama | $0 | $0 |
 
 _*Tracked for visibility but covered by subscription — actual cost is $0._
 
 ## Configuration
 
-Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`engines.{claude,codex,grok}`**, and optional **`defaultFallbackChain`**. Example:
+Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`engines.{claude,codex,grok,ollama}`**, and optional **`defaultFallbackChain`**. Example:
 
 ```jsonc
 {
@@ -131,7 +139,7 @@ Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`eng
     "sentinel-bridge": {
       "defaultEngine": "claude",
       "defaultModel": "claude/sonnet",
-      "defaultFallbackChain": ["claude", "codex", "grok"],
+      "defaultFallbackChain": ["claude", "codex", "grok", "ollama"],
       "maxConcurrentSessions": 5,
       "sessionTTLMs": 604800000,
       "engines": {
@@ -146,6 +154,11 @@ Use **`sessionTTLMs`** and **`cleanupIntervalMs`** (milliseconds), nested **`eng
         "grok": {
           "enabled": false,
           "defaultModel": "grok-4-1-fast"
+        },
+        "ollama": {
+          "enabled": true,
+          "baseUrl": "http://localhost:11434/v1",
+          "defaultModel": "llama3.2"
         }
       }
     }
@@ -173,7 +186,7 @@ That makes it useful even when OpenClaw itself gains stronger native provider su
 The codebase is split into focused modules:
 
 - `src/routing/*` — model aliases, model resolution, fallback expansion, routing trace, capability hints
-- `src/engines/*` — engine adapters (Claude CLI, Codex CLI, Grok HTTP) + engine factory + shared utilities
+- `src/engines/*` — engine adapters (Claude CLI, Codex CLI, Grok HTTP, Ollama HTTP/SSE) + engine factory + shared utilities
 - `src/sessions/*` — session store (atomic JSON), event store (JSONL), session mutex, cleanup, info shaping
 - `src/session-manager.ts` — orchestration facade (mutex-protected)
 - `src/errors.ts` — `EngineError` with typed categories and retry metadata

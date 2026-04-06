@@ -43,7 +43,7 @@ export const PROVIDER_CAPABILITIES: Record<EngineKind, ProviderCapabilities> = {
     authMode: 'http-api',
     supportsResume: false,
     supportsPersistentProcess: false,
-    supportsStreaming: false,
+    supportsStreaming: true,
     supportsWorkingDirectoryState: false,
     transport: 'http',
   },

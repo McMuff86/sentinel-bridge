@@ -44,7 +44,7 @@ export type { LogLevel, LogCategory, LogEntry, ExternalLogger } from './logging.
 export { EngineError, toEngineError } from './errors.js';
 export type { ErrorCategory } from './errors.js';
 
-type EngineKind = 'claude' | 'codex' | 'grok';
+type EngineKind = 'claude' | 'codex' | 'grok' | 'ollama';
 
 interface ToolDef {
   name: string;
@@ -120,7 +120,7 @@ function buildTools(): ToolDef[] {
       description:
         'Start a new engine session. Returns a session handle for follow-up messages. ' +
         'If the primary engine fails to start, the plugin retries along config.defaultFallbackChain ' +
-        '(default: claude → codex → grok); use an empty chain to disable.',
+        '(default: claude → codex → grok → ollama); use an empty chain to disable.',
       parameters: {
         type: 'object',
         properties: {
@@ -156,22 +156,42 @@ function buildTools(): ToolDef[] {
     },
     {
       name: 'sb_session_send',
-      description: 'Send a message to an active session and get the response.',
+      description:
+        'Send a message to an active session and get the response. ' +
+        'Set stream=true for incremental output (supported by Ollama and Grok engines).',
       parameters: {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'Session name' },
           message: { type: 'string', description: 'Message to send' },
+          stream: {
+            type: 'boolean',
+            description: 'Enable streaming for incremental output (default: false)',
+          },
         },
         required: ['name', 'message'],
       },
       handler: async (params, ctx) => {
+        const wantsStream = params['stream'] === true;
+        const chunks: string[] = [];
+
+        const onChunk = wantsStream
+          ? (chunk: string) => { chunks.push(chunk); }
+          : undefined;
+
         const result = await ctx.manager.sendMessage(
           readRequiredString(params, 'name'),
           readRequiredString(params, 'message'),
+          onChunk,
         );
 
-        return serializeTurnResult(result);
+        const serialized = serializeTurnResult(result);
+        if (wantsStream && chunks.length > 0) {
+          serialized.streamed = true;
+          serialized.chunkCount = chunks.length;
+        }
+
+        return serialized;
       },
     },
     {

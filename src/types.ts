@@ -82,7 +82,7 @@ export interface SentinelBridgeConfig {
 
 export interface IEngine {
   start(config?: Partial<EngineConfig>): Promise<void>;
-  send(message: string): Promise<string>;
+  send(message: string, onChunk?: (chunk: string) => void): Promise<string>;
   compact(summary?: string): Promise<string>;
   stop(): Promise<void>;
   /** Cancel the current in-flight operation without stopping the session. */

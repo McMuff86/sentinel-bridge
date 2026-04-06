@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-sentinel-bridge is an OpenClaw plugin that provides Claude Code CLI, Codex CLI, and Grok API as engine providers. Clean-room implementation — no code copied from reference projects.
+sentinel-bridge is an OpenClaw plugin that provides Claude Code CLI, Codex CLI, Grok API, and Ollama (local LLM) as engine providers. Clean-room implementation — no code copied from reference projects.
 
 ## Code Style
 
@@ -50,6 +50,7 @@ sentinel-bridge/
 │   │   ├── claude-engine.ts      # ClaudeEngine: CLI subprocess, stream-json
 │   │   ├── codex-engine.ts       # CodexEngine: CLI per-message, auth detection
 │   │   ├── grok-engine.ts        # GrokEngine: HTTP API, retry with backoff
+│   │   ├── ollama-engine.ts      # OllamaEngine: local LLM, streaming SSE, retry
 │   │   ├── create-engine.ts      # Engine factory
 │   │   └── shared.ts             # mergeEngineConfig, token/cost math, utilities
 │   ├── routing/
@@ -71,6 +72,7 @@ sentinel-bridge/
 │       ├── claude-engine.test.ts
 │       ├── codex-engine.test.ts
 │       ├── grok-engine.test.ts
+│       ├── ollama-engine.test.ts
 │       ├── errors.test.ts
 │       ├── logging.test.ts
 │       ├── session-mutex.test.ts
@@ -89,7 +91,7 @@ sentinel-bridge/
 
 - **Framework:** vitest (run via `npx vitest run`)
 - **Unit tests:** 122+ tests across 14 test files in `src/__tests__/`
-- **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok
+- **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually
 - **CI:** GitHub Actions runs tests on push/PR to main (Node 22)

@@ -170,17 +170,25 @@ export class SessionManager {
     );
   }
 
-  async sendMessage(name: string, message: string): Promise<SendMessageResult> {
+  async sendMessage(
+    name: string,
+    message: string,
+    onChunk?: (chunk: string) => void,
+  ): Promise<SendMessageResult> {
     validateSessionName(name);
     const release = await this.mutex.acquire(name);
     try {
-      return await this.sendMessageInner(name, message);
+      return await this.sendMessageInner(name, message, onChunk);
     } finally {
       release();
     }
   }
 
-  private async sendMessageInner(name: string, message: string): Promise<SendMessageResult> {
+  private async sendMessageInner(
+    name: string,
+    message: string,
+    onChunk?: (chunk: string) => void,
+  ): Promise<SendMessageResult> {
     const record = this.requireSession(name);
     const prevCost = record.session.costUsd;
     const prevTokens = { ...record.session.tokenCount };
@@ -192,7 +200,7 @@ export class SessionManager {
 
     let output: string;
     try {
-      output = await this.send(name, message);
+      output = await this.send(name, message, onChunk);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.log.error('engine', `Send failed for "${name}": ${errMsg}`, { session: name, engine: record.session.engine });
@@ -541,7 +549,7 @@ export class SessionManager {
     return cloneSession(record.session);
   }
 
-  async send(name: string, message: string): Promise<string> {
+  async send(name: string, message: string, onChunk?: (chunk: string) => void): Promise<string> {
     this.cleanupExpiredSessions();
 
     let record = this.sessions.get(name);
@@ -558,7 +566,7 @@ export class SessionManager {
     }
 
     try {
-      const response = await record.engineInstance.send(message);
+      const response = await record.engineInstance.send(message, onChunk);
       record.lastTouchedAt = Date.now();
       syncSession(record);
       this.store.upsert(this.requireSessionInfo(name));
@@ -869,8 +877,21 @@ export class SessionManager {
     engine: EngineKind,
     error: unknown,
   ): Error {
-    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof EngineError) {
+      const wrapped = new EngineError(
+        `Failed to ${action} ${engine} session "${name}": ${error.message}`,
+        error.category,
+        {
+          cause: error,
+          httpStatus: error.httpStatus,
+          retriable: error.retriable,
+          retryAfterMs: error.retryAfterMs,
+        },
+      );
+      return wrapped;
+    }
 
+    const message = error instanceof Error ? error.message : String(error);
     return new Error(
       `Failed to ${action} ${engine} session "${name}": ${message}`,
     );

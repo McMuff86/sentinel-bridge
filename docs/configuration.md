@@ -5,7 +5,7 @@ OpenClaw passes this object to `getConfig()`; `src/index.ts` merges it with `DEF
 
 ## Shape (nested `engines`)
 
-Engine-specific options **must** live under `engines.claude`, `engines.codex`, and `engines.grok` — not at the top level next to `defaultEngine`.
+Engine-specific options **must** live under `engines.claude`, `engines.codex`, `engines.grok`, and `engines.ollama` — not at the top level next to `defaultEngine`.
 
 ```jsonc
 {
@@ -13,7 +13,7 @@ Engine-specific options **must** live under `engines.claude`, `engines.codex`, a
     "sentinel-bridge": {
       "defaultEngine": "claude",
       "defaultModel": "claude/opus",
-      "defaultFallbackChain": ["claude", "codex", "grok"],
+      "defaultFallbackChain": ["claude", "codex", "grok", "ollama"],
       "maxConcurrentSessions": 5,
       "sessionTTLMs": 604800000,
       "cleanupIntervalMs": 3600000,
@@ -40,6 +40,11 @@ Engine-specific options **must** live under `engines.claude`, `engines.codex`, a
           "defaultModel": "grok-4-1-fast",
           "apiKey": "xai-...",
           "baseUrl": "https://api.x.ai/v1"
+        },
+        "ollama": {
+          "enabled": true,
+          "defaultModel": "llama3.2",
+          "baseUrl": "http://localhost:11434/v1"
         }
       }
     }
@@ -51,9 +56,9 @@ Engine-specific options **must** live under `engines.claude`, `engines.codex`, a
 
 | Option | Type | Default (code) | Description |
 |--------|------|----------------|-------------|
-| `defaultEngine` | `"claude" \| "codex" \| "grok"` | `"claude"` | When `sb_session_start` omits `engine` |
+| `defaultEngine` | `"claude" \| "codex" \| "grok" \| "ollama"` | `"claude"` | When `sb_session_start` omits `engine` |
 | `defaultModel` | `string` | see `DEFAULT_CONFIG` | Model ref when none passed to start |
-| `defaultFallbackChain` | engine[] | `["claude","codex","grok"]` | After **primary**, retry `start()` on these engines. `[]` = off |
+| `defaultFallbackChain` | engine[] | `["claude","codex","grok","ollama"]` | After **primary**, retry `start()` on these engines. `[]` = off |
 | `maxConcurrentSessions` | `number` | `5` | Active session cap |
 | `sessionTTLMs` | `number` | 7 days | Idle TTL **milliseconds** |
 | `cleanupIntervalMs` | `number` | 1 hour | Expiry sweep interval **milliseconds** |
@@ -62,14 +67,14 @@ Engine-specific options **must** live under `engines.claude`, `engines.codex`, a
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `command` | `string` | CLI binary (Claude/Codex); Grok ignores |
+| `command` | `string` | CLI binary (Claude/Codex); Grok/Ollama ignore |
 | `args` | `string[]` | Extra CLI args |
 | `defaultModel` | `string` | Default model id for this engine |
 | `cwd` | `string` | Default working directory for sessions |
 | `env` | `object` | Extra env for subprocess (e.g. `OPENAI_API_KEY`) |
 | `enabled` | `boolean` | `false` disables engine + CLI backend registration |
-| `apiKey` | `string` | Grok: xAI key (or use `XAI_API_KEY`) |
-| `baseUrl` | `string` | Grok API base |
+| `apiKey` | `string` | Grok: xAI key (or use `XAI_API_KEY`); Ollama: optional (for proxies) |
+| `baseUrl` | `string` | Grok API base; Ollama default: `http://localhost:11434/v1` |
 
 **Note:** Pricing overrides and some fields mentioned in older docs are **not** read from plugin config today; cost logic uses engine internals / defaults.
 
@@ -86,7 +91,7 @@ Aliases, prefixes (`claude/...`), and fallback behaviour are documented in [API-
 | `OPENAI_API_KEY` | Codex CLI (optional env-backed auth if not using existing CLI login) |
 | `XAI_API_KEY` | Grok (if `apiKey` not set) |
 
-Claude uses CLI auth (`claude login`). Codex can use existing CLI auth and may also honor env-backed auth depending on host setup.
+Claude uses CLI auth (`claude login`). Codex can use existing CLI auth and may also honor env-backed auth depending on host setup. Ollama requires no authentication — it runs locally.
 
 ## Live testing
 

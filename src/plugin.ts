@@ -85,7 +85,7 @@ export const DEFAULT_CONFIG: SentinelBridgeConfig = {
   },
   defaultEngine: 'claude',
   defaultModel: 'claude/claude-opus-4-6',
-  defaultFallbackChain: ['claude', 'codex', 'grok'],
+  defaultFallbackChain: ['claude', 'codex', 'grok', 'ollama'],
   maxConcurrentSessions: 5,
   sessionTTLMs: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
