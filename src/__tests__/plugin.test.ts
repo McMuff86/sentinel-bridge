@@ -16,17 +16,19 @@ describe('plugin metadata', () => {
 });
 
 describe('default config', () => {
-  it('has 3 engines configured', () => {
+  it('has 4 engines configured', () => {
     expect(DEFAULT_CONFIG.engines).toBeDefined();
     expect(DEFAULT_CONFIG.engines!.claude).toBeDefined();
     expect(DEFAULT_CONFIG.engines!.codex).toBeDefined();
     expect(DEFAULT_CONFIG.engines!.grok).toBeDefined();
+    expect(DEFAULT_CONFIG.engines!.ollama).toBeDefined();
   });
 
-  it('claude and codex enabled by default, grok disabled', () => {
+  it('claude and codex enabled by default, grok and ollama disabled', () => {
     expect(DEFAULT_CONFIG.engines!.claude!.enabled).toBe(true);
     expect(DEFAULT_CONFIG.engines!.codex!.enabled).toBe(true);
     expect(DEFAULT_CONFIG.engines!.grok!.enabled).toBe(false);
+    expect(DEFAULT_CONFIG.engines!.ollama!.enabled).toBe(false);
   });
 
   it('has sensible session limits', () => {

@@ -8,8 +8,8 @@ describe('types', () => {
   });
 
   it('EngineKind includes all engines', () => {
-    const kinds: EngineKind[] = ['claude', 'codex', 'grok'];
-    expect(kinds).toHaveLength(3);
+    const kinds: EngineKind[] = ['claude', 'codex', 'grok', 'ollama'];
+    expect(kinds).toHaveLength(4);
   });
 
   it('ModelPricing has correct shape', () => {

@@ -38,6 +38,15 @@ export const PROVIDER_CAPABILITIES: Record<EngineKind, ProviderCapabilities> = {
     supportsWorkingDirectoryState: false,
     transport: 'http',
   },
+  ollama: {
+    engine: 'ollama',
+    authMode: 'http-api',
+    supportsResume: false,
+    supportsPersistentProcess: false,
+    supportsStreaming: false,
+    supportsWorkingDirectoryState: false,
+    transport: 'http',
+  },
 };
 
 export function getProviderCapabilities(engine: EngineKind): ProviderCapabilities {

@@ -18,7 +18,7 @@ export type SessionPhase =
 
 export type SessionAction = 'start' | 'send' | 'compact' | 'stop' | 'rehydrate';
 
-export type EngineKind = 'claude' | 'codex' | 'grok';
+export type EngineKind = 'claude' | 'codex' | 'grok' | 'ollama';
 
 export type ModelRouteSource = 'explicit' | 'alias' | 'default';
 
@@ -77,6 +77,7 @@ export interface SentinelBridgeConfig {
   claude?: Partial<EngineConfig>;
   codex?: Partial<EngineConfig>;
   grok?: Partial<EngineConfig>;
+  ollama?: Partial<EngineConfig>;
 }
 
 export interface IEngine {

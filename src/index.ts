@@ -100,11 +100,12 @@ interface PluginApi {
   logger?: PluginLogger;
 }
 
-const ENGINE_KINDS: EngineKind[] = ['claude', 'codex', 'grok'];
+const ENGINE_KINDS: EngineKind[] = ['claude', 'codex', 'grok', 'ollama'];
 const DEFAULT_ENGINE_COMMANDS: Record<EngineKind, string | undefined> = {
   claude: 'claude',
   codex: 'codex',
   grok: undefined,
+  ollama: undefined,
 };
 
 /**
@@ -503,6 +504,7 @@ function mergePluginConfig(
       claude: mergeEnginePluginConfig(defaults.engines?.claude, overrides.engines?.claude),
       codex: mergeEnginePluginConfig(defaults.engines?.codex, overrides.engines?.codex),
       grok: mergeEnginePluginConfig(defaults.engines?.grok, overrides.engines?.grok),
+      ollama: mergeEnginePluginConfig(defaults.engines?.ollama, overrides.engines?.ollama),
     },
   };
 }
@@ -788,6 +790,7 @@ function toSessionManagerConfig(
     claude: normalizeEngineConfig(config.engines?.claude),
     codex: normalizeEngineConfig(config.engines?.codex),
     grok: normalizeEngineConfig(config.engines?.grok),
+    ollama: normalizeEngineConfig(config.engines?.ollama),
   };
 }
 
@@ -824,7 +827,7 @@ function getEngineDescriptor(
       available: false,
       healthy: false,
       binary: null,
-      authMethod: engine === 'grok' ? 'api-key' : 'cli',
+      authMethod: engine === 'grok' || engine === 'ollama' ? 'api-key' : 'cli',
       authValid: false,
       model,
       note: 'Engine is disabled in plugin config.',
@@ -843,6 +846,20 @@ function getEngineDescriptor(
       authValid: Boolean(apiKey),
       model,
       note: apiKey ? undefined : 'Set XAI_API_KEY or configure engines.grok.apiKey.',
+    };
+  }
+
+  if (engine === 'ollama') {
+    return {
+      id: engine,
+      enabled,
+      available: true,  // Actual reachability checked on start()
+      healthy: true,
+      binary: null,
+      authMethod: 'none',
+      authValid: true,
+      model,
+      note: 'Ollama (local). Reachability verified on session start.',
     };
   }
 

@@ -81,5 +81,6 @@ export function createEmptyBreakdownMap(): Record<EngineKind, EngineCostBreakdow
     claude: createEmptyBreakdown(),
     codex: createEmptyBreakdown(),
     grok: createEmptyBreakdown(),
+    ollama: createEmptyBreakdown(),
   };
 }

@@ -7,7 +7,7 @@ export type UsageAction = 'start' | 'send' | 'compact' | 'stop';
 export interface UsageLogEntry {
   timestamp: string;
   sessionName: string;
-  engine: 'claude' | 'codex' | 'grok';
+  engine: 'claude' | 'codex' | 'grok' | 'ollama';
   model: string;
   action: 'start' | 'send' | 'compact' | 'stop';
   tokens?: { input: number; output: number; cachedInput: number; total: number };

@@ -1,6 +1,7 @@
 import { ClaudeEngine } from './claude-engine.js';
 import { CodexEngine } from './codex-engine.js';
 import { GrokEngine } from './grok-engine.js';
+import { OllamaEngine } from './ollama-engine.js';
 import type { EngineConfig, EngineKind, IEngine } from '../types.js';
 
 export function createEngine(
@@ -14,6 +15,8 @@ export function createEngine(
       return new CodexEngine(config);
     case 'grok':
       return new GrokEngine(config);
+    case 'ollama':
+      return new OllamaEngine(config);
     default: {
       const exhaustiveCheck: never = engine;
       throw new Error(`Unsupported engine: ${exhaustiveCheck}`);

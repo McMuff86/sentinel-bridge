@@ -2,7 +2,7 @@
   "id": "sentinel-bridge",
   "name": "Sentinel Bridge",
   "version": "0.1.0",
-  "description": "Multi-engine bridge: Claude Code CLI, Codex CLI, Grok API for OpenClaw.",
+  "description": "Multi-engine bridge: Claude Code CLI, Codex CLI, Grok API, Ollama for OpenClaw.",
   "main": "./dist/index.js",
   "type": "module",
   "enabledByDefault": false,
@@ -12,7 +12,7 @@
     "properties": {
       "defaultEngine": {
         "type": "string",
-        "enum": ["claude", "codex", "grok"],
+        "enum": ["claude", "codex", "grok", "ollama"],
         "default": "claude"
       },
       "defaultModel": {
@@ -21,7 +21,7 @@
       },
       "defaultFallbackChain": {
         "type": "array",
-        "items": { "type": "string", "enum": ["claude", "codex", "grok"] },
+        "items": { "type": "string", "enum": ["claude", "codex", "grok", "ollama"] },
         "description": "After primary, try these engines if start() fails. [] disables."
       },
       "maxConcurrentSessions": { "type": "number", "default": 5 },
@@ -68,6 +68,16 @@
               "env": { "type": "object" },
               "enabled": { "type": "boolean" }
             }
+          },
+          "ollama": {
+            "type": "object",
+            "properties": {
+              "defaultModel": { "type": "string" },
+              "baseUrl": { "type": "string" },
+              "cwd": { "type": "string" },
+              "env": { "type": "object" },
+              "enabled": { "type": "boolean" }
+            }
           }
         }
       }
@@ -75,7 +85,7 @@
   },
   "capabilities": {
     "childProcess": true,
-    "networkAccess": ["api.x.ai"]
+    "networkAccess": ["api.x.ai", "localhost"]
   },
   "contracts": {
     "tools": [

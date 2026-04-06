@@ -717,6 +717,8 @@ export class SessionManager {
         return this.config.codex ?? {};
       case 'grok':
         return this.config.grok ?? {};
+      case 'ollama':
+        return this.config.ollama ?? {};
       default: {
         const exhaustiveCheck: never = engine;
         throw new Error(`Unsupported engine: ${exhaustiveCheck}`);
@@ -827,6 +829,8 @@ export class SessionManager {
         return 'gpt-5.4';
       case 'grok':
         return 'grok-4-1-fast';
+      case 'ollama':
+        return 'llama3.2';
       default: {
         const exhaustiveCheck: never = engine;
         throw new Error(`Unsupported engine: ${exhaustiveCheck}`);

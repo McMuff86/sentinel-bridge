@@ -1,6 +1,6 @@
 import type { EngineKind } from '../types.js';
 
-export const DEFAULT_FALLBACK_CHAIN: EngineKind[] = ['claude', 'codex', 'grok'];
+export const DEFAULT_FALLBACK_CHAIN: EngineKind[] = ['claude', 'codex', 'grok', 'ollama'];
 
 export const MODEL_ALIASES: Record<EngineKind, Record<string, string>> = {
   claude: {
@@ -29,5 +29,19 @@ export const MODEL_ALIASES: Record<EngineKind, Record<string, string>> = {
     'grok-3': 'grok-3',
     'grok-mini': 'grok-3-mini',
     'grok-3-mini': 'grok-3-mini',
+  },
+  ollama: {
+    'llama3': 'llama3.2',
+    'llama3.2': 'llama3.2',
+    'llama3.1': 'llama3.1',
+    'mistral': 'mistral',
+    'codellama': 'codellama',
+    'deepseek': 'deepseek-r1',
+    'deepseek-r1': 'deepseek-r1',
+    'qwen': 'qwen2.5-coder',
+    'qwen2.5-coder': 'qwen2.5-coder',
+    'gemma': 'gemma3',
+    'gemma3': 'gemma3',
+    'phi4': 'phi4',
   },
 };

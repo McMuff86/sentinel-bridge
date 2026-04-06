@@ -125,6 +125,8 @@ function parseEngineKind(value: string): EngineKind | undefined {
     case 'grok':
     case 'xai':
       return 'grok';
+    case 'ollama':
+      return 'ollama';
     default:
       return undefined;
   }
@@ -163,6 +165,19 @@ function inferEngineFromModel(model: string): EngineKind | undefined {
     normalizedModel === 'codex'
   ) {
     return 'codex';
+  }
+
+  if (
+    normalizedModel.startsWith('llama') ||
+    normalizedModel.startsWith('mistral') ||
+    normalizedModel.startsWith('codellama') ||
+    normalizedModel.startsWith('deepseek') ||
+    normalizedModel.startsWith('qwen') ||
+    normalizedModel.startsWith('gemma') ||
+    normalizedModel.startsWith('phi') ||
+    normalizedModel.startsWith('moondream')
+  ) {
+    return 'ollama';
   }
 
   return undefined;
