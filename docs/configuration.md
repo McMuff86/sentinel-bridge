@@ -73,6 +73,8 @@ Engine-specific options **must** live under `engines.claude`, `engines.codex`, a
 
 **Note:** Pricing overrides and some fields mentioned in older docs are **not** read from plugin config today; cost logic uses engine internals / defaults.
 
+**Deep merge:** Engine `env` objects are deep-merged with defaults. If you set `engines.claude.command` in your override, the default `env` values are preserved (not wiped). Other per-engine fields use shallow spread — the override wins.
+
 ## Model routing
 
 Aliases, prefixes (`claude/...`), and fallback behaviour are documented in [API-REFERENCE.md](./API-REFERENCE.md).

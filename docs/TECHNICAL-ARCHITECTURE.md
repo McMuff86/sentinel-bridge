@@ -40,54 +40,32 @@
 
 ## IEngine Interface
 
-All engines implement a common interface. This ensures SessionManager can orchestrate them uniformly without engine-specific branching.
+All engines implement a common interface (defined in `src/types.ts`). This ensures SessionManager can orchestrate them uniformly without engine-specific branching.
 
 ```typescript
-interface IEngine extends EventEmitter {
-  // ── Identity ──────────────────────────────────────────────
-  readonly engineType: EngineType;      // 'claude' | 'codex' | 'grok'
-  sessionId?: string;
-
-  // ── State ─────────────────────────────────────────────────
-  readonly isReady: boolean;
-  readonly isPaused: boolean;
-  readonly isBusy: boolean;
-
-  // ── Lifecycle ─────────────────────────────────────────────
-  start(config: EngineStartConfig): Promise<this>;
-  stop(): void;
-  pause(): void;
-  resume(): void;
-
-  // ── Communication ─────────────────────────────────────────
-  send(message: string, options?: SendOptions): Promise<TurnResult>;
-
-  // ── Observability ─────────────────────────────────────────
-  getStats(): EngineStats;
-  getCost(): CostBreakdown;
-  getHistory(limit?: number): HistoryEntry[];
-
-  // ── Context Management ────────────────────────────────────
-  compact(summary?: string): Promise<TurnResult>;
-  getEffort(): EffortLevel;
-  setEffort(level: EffortLevel): void;
-
-  // ── Model ─────────────────────────────────────────────────
-  resolveModel(alias: string): string;
+interface IEngine {
+  start(config?: Partial<EngineConfig>): Promise<void>;
+  send(message: string): Promise<string>;
+  compact(summary?: string): Promise<string>;
+  stop(): Promise<void>;
+  cancel(): void;                     // Abort in-flight operation without stopping
+  status(): EngineStatusSnapshot;
+  getSessionId(): string | null;
 }
 ```
 
-### Events emitted by all engines
+Engines throw `EngineError` (from `src/errors.ts`) with typed categories:
 
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `ready` | — | Engine subprocess is initialized and accepting messages |
-| `text` | `string` | Streaming text chunk from engine |
-| `tool_use` | `{ tool, input }` | Engine is invoking a tool |
-| `tool_result` | `{ tool, output, error? }` | Tool execution completed |
-| `turn_complete` | `TurnResult` | Full turn finished |
-| `error` | `Error` | Engine error (process crash, timeout, etc.) |
-| `exit` | `{ code, signal }` | Engine process exited |
+| Category | Retriable | Examples |
+|----------|-----------|----------|
+| `unavailable` | no | CLI not found (ENOENT) |
+| `auth_expired` | no | Invalid API key, expired CLI auth |
+| `rate_limited` | yes | HTTP 429 |
+| `timeout` | yes | Request exceeded deadline |
+| `context_overflow` | no | Token limit exceeded (HTTP 413) |
+| `transient` | yes | HTTP 5xx, temporary service error |
+| `cancelled` | no | User/system cancelled via `cancel()` |
+| `unknown` | no | Unclassified |
 
 ## Engine Implementations
 
@@ -142,75 +120,58 @@ stop()  → kill active process if any → cleanup
 **Key behaviors:**
 - HTTP-based (no subprocess)
 - Maintains conversation history in-memory for multi-turn
-- Supports streaming via SSE (`stream: true`)
-- Models: `grok-3`, `grok-3-mini`, `grok-2`
-- Tool use via OpenAI-compatible function calling format
+- Non-streaming mode (`stream: false`) for reliable response parsing
+- Models: `grok-4-1-fast`, `grok-3`, `grok-4`
+- **Retry with exponential backoff** for retriable errors (429, 5xx)
+- `cancel()` aborts in-flight request via AbortController
 - Compact via conversation history truncation with summary
 
 **Lifecycle:**
 ```
-start() → validate API key → isReady = true
-send()  → POST /chat/completions → parse response → TurnResult
-stop()  → clear conversation history → cleanup
+start()  → validate API key + model → state = running
+send()   → POST /chat/completions (with retry) → parse response → string
+cancel() → abort AbortController → stay running
+stop()   → abort + state = stopped
 ```
 
 ## SessionManager
 
-The SessionManager is the central orchestrator. It owns all active sessions and provides the API surface that tools call.
+The SessionManager is the central orchestrator. It owns all active sessions and provides the API surface that tools call. Delegates to focused modules:
 
-After the current refactor pass, it is deliberately thinner than before:
-
-- `src/routing/resolve-model-route.ts` handles model resolution
-- `src/routing/expand-fallback-chain.ts` handles fallback ordering
-- `src/routing/routing-trace.ts` captures routing decisions during session start
-- `src/routing/provider-capabilities.ts` is a light capability registry for future routing rules
-- `src/engines/create-engine.ts` handles engine construction
-- `src/sessions/session-info.ts` shapes session/status payloads
-- `src/sessions/session-cleanup.ts` owns TTL expiry cleanup
+- `src/routing/*` — model resolution, fallback ordering, routing trace, capability hints
+- `src/engines/create-engine.ts` — engine construction
+- `src/sessions/session-store.ts` — JSON persistence (atomic writes)
+- `src/sessions/session-events.ts` — JSONL event timeline
+- `src/sessions/session-mutex.ts` — per-session promise-based lock
+- `src/sessions/session-cleanup.ts` — TTL expiry sweep
+- `src/sessions/session-info.ts` — session payload shaping
+- `src/errors.ts` — EngineError with typed categories
+- `src/logging.ts` — StructuredLogger
 
 ```typescript
 class SessionManager {
-  private sessions: Map<string, ManagedSession>;
-  private config: PluginConfig;
-  private persistedSessions: Map<string, PersistedSession>;
-
-  // ── Session Lifecycle ──────────────────────────────
-  startSession(opts: SessionStartOpts): Promise<SessionInfo>;
+  // ── Session Lifecycle (mutex-protected) ────────────
+  startSession(opts: SessionStartOptions): Promise<SessionInfo>;
+  sendMessage(name: string, message: string): Promise<SendMessageResult>;
   stopSession(name: string): Promise<void>;
+  cancelSession(name: string): SessionInfo;
+  compactSession(name: string, summary?: string): Promise<SendMessageResult>;
+
+  // ── Queries ────────────────────────────────────────
   listSessions(): SessionInfo[];
-
-  // ── Communication ──────────────────────────────────
-  sendMessage(name: string, message: string, opts?: SendOpts): Promise<SendResult>;
-
-  // ── Observability ──────────────────────────────────
-  getStatus(name: string): SessionStatus;
-  health(): HealthReport;
-
-  // ── Session Management ─────────────────────────────
-  compactSession(name: string, summary?: string): Promise<void>;
-  switchModel(name: string, model: string): Promise<SessionInfo>;
-  switchEngine(name: string, engine: EngineType): Promise<SessionInfo>;
+  getSessionStatus(name: string): SessionInfo | undefined;
+  getOverview(): SessionOverview;
+  getCostReport(since?: string): CostReport;
+  resolveModelRoute(model: string, preferredEngine?: EngineKind): ModelRoute;
 
   // ── Cleanup ────────────────────────────────────────
   shutdown(): Promise<void>;
 }
 ```
 
-### ManagedSession (internal)
+### Session Name Validation
 
-```typescript
-interface ManagedSession {
-  engine: IEngine;
-  config: SessionConfig;
-  created: string;
-  lastActivity: string;
-  engineType: EngineType;
-}
-```
-
-### Session Name Generation
-
-Auto-generated names follow the pattern: `{engine}-{adjective}-{noun}` (e.g., `claude-swift-falcon`, `codex-bold-raven`).
+Session names must match `^[a-zA-Z0-9][a-zA-Z0-9 _-]{0,63}$` (1-64 chars, alphanumeric start). This prevents path traversal and file system issues.
 
 ### TTL & Cleanup
 
@@ -222,7 +183,9 @@ Auto-generated names follow the pattern: `{engine}-{adjective}-{noun}` (e.g., `c
 ### Concurrency
 
 - `maxConcurrentSessions` limit (default: 5)
-- New session requests beyond the limit return an error with active session names
+- New session requests beyond the limit return an error
+- **Per-session mutex** serialises send/stop/compact on the same session — no race conditions
+- **Rehydration deduplication** prevents concurrent rehydration of the same session
 - Each engine runs in its own subprocess/context — no shared state
 
 ## Routing trace
@@ -301,33 +264,31 @@ User sets XAI_API_KEY env var (or configures in plugin config)
 
 ## Cost Tracking
 
-Each engine tracks token usage and computes cost using a model pricing table:
+Each engine tracks token usage via `EngineUsageSnapshot` and computes cost per turn:
 
 ```typescript
-interface CostBreakdown {
-  engine: EngineType;
-  model: string;
-  tokensIn: number;
-  tokensOut: number;
-  cachedTokens: number;
-  pricing: ModelPricing;
-  totalUsd: number;
-  subscriptionCovered: boolean;  // true for Claude with subscription
+interface EngineUsageSnapshot {
+  costUsd: number;
+  tokenCount: { input: number; output: number; cachedInput: number; total: number };
+  lastError?: string;
+  lastResponseAt?: Date;
 }
 ```
 
+`sb_cost_report` aggregates across sessions with per-engine breakdowns and subscription savings.
+
 ### Pricing Table
 
-Maintained as a runtime-mutable map with known defaults. Users can override via `pricingOverrides` in plugin config.
+Maintained as embedded defaults per engine. Users can override via `pricing` in engine config.
 
 | Model | Input/1M | Output/1M | Cached/1M |
 |-------|----------|-----------|-----------|
-| claude-opus-4 | $15.00 | $75.00 | $1.50 |
+| claude-opus-4-6 | $15.00 | $75.00 | $1.50 |
 | claude-sonnet-4-5 | $3.00 | $15.00 | $0.30 |
-| o4-mini | $1.10 | $4.40 | — |
-| codex-mini | $1.50 | $6.00 | — |
-| grok-3 | $3.00 | $15.00 | — |
-| grok-3-mini | $0.30 | $0.50 | — |
+| gpt-5.4 | $2.50 | $15.00 | $0.25 |
+| o4-mini | $1.25 | $10.00 | $0.125 |
+| grok-4-1-fast | $0.20 | $0.50 | $0.05 |
+| grok-3 / grok-4 | $3.00 | $15.00 | $0.75 |
 
 **Note:** Costs in sentinel-bridge are tracking metadata for observability. Real billing depends on the backing engine/account configuration on the host.
 
@@ -340,38 +301,43 @@ Maintained as a runtime-mutable map with known defaults. Users can override via 
 
 ## Error Handling & Fallback Strategy
 
-### Error Categories
+### Error Categories (implemented in `src/errors.ts`)
 
-| Category | Examples | Handling |
-|----------|----------|----------|
-| `engine_unavailable` | CLI not installed, API key missing | Immediate error, suggest setup |
-| `engine_crash` | Process exit non-zero, segfault | Attempt restart with `--resume` (Claude), retry (Codex), error (Grok) |
-| `timeout` | No response within deadline | Kill process, return partial output if any |
-| `rate_limit` | 429 from API | Exponential backoff (3 retries, 1s/2s/4s) |
-| `context_overflow` | Token limit exceeded | Auto-compact, retry send |
-| `auth_failure` | Expired token, invalid key | Error with specific guidance |
+All engines throw `EngineError` with a typed `category` and `retriable` flag:
 
-### Fallback Chain
+| Category | Retriable | Examples | Handling |
+|----------|-----------|----------|----------|
+| `unavailable` | no | CLI not found (ENOENT) | Immediate fallback to next engine |
+| `auth_expired` | no | Invalid API key, expired CLI auth | Immediate error with guidance |
+| `rate_limited` | yes | HTTP 429 from Grok | Retry with exponential backoff (1s/2s/4s), respects `Retry-After` |
+| `timeout` | yes | Request exceeded deadline | Retry or fallback |
+| `context_overflow` | no | Token limit exceeded (HTTP 413) | Error to caller |
+| `transient` | yes | HTTP 5xx, temporary service error | Retry with backoff |
+| `cancelled` | no | User cancelled via `sb_session_cancel` | No retry |
+| `unknown` | no | Unclassified | Fallback to next engine |
 
-When `fallbackEngine` is configured:
+### Grok Retry
+
+Grok engine retries retriable errors up to 3 times with exponential backoff:
+- Base: 1s → 2s → 4s (capped at 10s)
+- Respects `Retry-After` header when present
+- Non-retriable errors (auth, context overflow) fail immediately
+
+### Fallback Chain (start only)
 
 ```
-Primary engine fails
-  → Error categorized
-  → If retriable: retry with backoff (max 3)
-  → If not retriable + fallback configured:
-      → Start fallback engine session
-      → Replay last message
-      → Return result with `fallback: true` flag
-  → If no fallback: return error to caller
+Primary engine start() fails
+  → Error categorized (EngineError.category logged)
+  → Try next engine in defaultFallbackChain
+  → Each engine uses its own default model (not the user's alias)
+  → If all fail: last error rethrown
 ```
 
-### Fallback is opt-in, not automatic. Users must explicitly configure `fallbackEngine` in plugin config.
+Fallback applies **only to `startSession`**. `sendMessage` does not fall back — the session is bound to one engine. Configure `defaultFallbackChain: []` to disable.
 
-### Health Checks
+### Periodic Cleanup
 
-SessionManager runs periodic health checks (every 60s):
-- Verify engine processes are alive (Claude, Codex)
-- Check API reachability (Grok)
-- Clean up dead sessions
-- Persist session metadata for resume
+SessionManager runs a periodic sweep (default: every hour):
+- Remove in-memory sessions past TTL
+- Purge persisted sessions that expired while plugin was offline
+- Clear event logs for expired sessions

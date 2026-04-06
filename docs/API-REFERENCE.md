@@ -102,6 +102,37 @@ List or inspect engine readiness (binary on PATH for CLIs, API key for Grok).
 
 ---
 
+### `sb_session_events`
+
+Return the last N events from the session event timeline (start, send, fail, stop, compact, rehydrate).
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `name` | yes | Session name |
+| `limit` | no | Max events to return (default 20) |
+
+**Returns:** `{ ok, name, count, events: SessionEvent[] }`.
+
+Each event: `{ ts, type, engine, sessionName, preview?, error? }`.
+
+---
+
+### `sb_session_cancel`
+
+Cancel the current in-flight operation (send/compact) without stopping the session. The session remains active and can receive new messages.
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `name` | yes | Session name |
+
+**Returns:** `{ ok, name, status, phase }`.
+
+---
+
 ## Model routing
 
 ### Explicit engine prefix
