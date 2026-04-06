@@ -8,6 +8,7 @@ import type {
   IEngine,
   ModelPricing,
 } from "../types.js";
+import { EngineError } from "../errors.js";
 import {
   buildCompactPrompt,
   calculateLinearUsageCost,
@@ -128,6 +129,16 @@ export class CodexEngine implements IEngine {
 
   async compact(summary?: string): Promise<string> {
     return this.send(buildCompactPrompt(summary));
+  }
+
+  cancel(): void {
+    if (this.activeProcess) {
+      this.activeProcess.kill("SIGTERM");
+      this.activeProcess = null;
+    }
+    if (this.state !== "stopped" && this.state !== "stopping") {
+      this.state = "running";
+    }
   }
 
   async stop(): Promise<void> {
@@ -530,35 +541,34 @@ export class CodexEngine implements IEngine {
     return text.trim() || undefined;
   }
 
-  private createSpawnError(error: unknown): Error {
+  private createSpawnError(error: unknown): EngineError {
     if (this.isJsonRecord(error) && error.code === "ENOENT") {
-      return new Error(
+      return new EngineError(
         "Codex CLI not found. Install `codex` and ensure it is available on PATH.",
+        'unavailable',
       );
     }
 
-    if (error instanceof Error) {
-      return new Error(error.message || "Codex process failed to start.");
-    }
-
-    return new Error("Codex process failed to start.");
+    const message = error instanceof Error ? error.message : "Codex process failed to start.";
+    return new EngineError(message || "Codex process failed to start.", 'unknown', { cause: error });
   }
 
   private createProcessError(
     stderr: string,
     code: number | null,
     signal: string | null,
-  ): Error {
+  ): EngineError {
     const trimmed = stderr.trim();
 
     if (/auth|login|api key|credential|unauthorized|forbidden/i.test(trimmed)) {
-      return new Error(
+      return new EngineError(
         "Codex authentication appears to be unavailable or expired. Configure `apiKey`/`CODEX_API_KEY` or refresh the CLI login.",
+        'auth_expired',
       );
     }
 
     const detail = trimmed || `exit code ${code ?? "unknown"} signal ${signal ?? "none"}`;
-    return new Error(`Codex command failed: ${detail}`);
+    return new EngineError(`Codex command failed: ${detail}`, 'unknown');
   }
 
   private getNestedValue(record: JsonRecord, path: string[]): unknown {

@@ -1,4 +1,5 @@
 import { createEngine } from './engines/create-engine.js';
+import { EngineError } from './errors.js';
 import {
   emptyTokenUsage,
   mergeEngineConfig,
@@ -146,10 +147,11 @@ export class SessionManager {
         return info;
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
-        this.log.warn('fallback', `Engine ${engine} failed for "${options.name}": ${errMsg}`, {
+        const errorCategory = error instanceof EngineError ? error.category : 'unknown';
+        this.log.warn('fallback', `Engine ${engine} failed for "${options.name}" [${errorCategory}]: ${errMsg}`, {
           session: options.name,
           engine,
-          meta: { attempt: index + 1, model: route.model },
+          meta: { attempt: index + 1, model: route.model, errorCategory },
         });
         appendRoutingAttempt(
           routingTrace,
@@ -239,6 +241,21 @@ export class SessionManager {
     } finally {
       release();
     }
+  }
+
+  cancelSession(name: string): SessionInfo {
+    validateSessionName(name);
+    const record = this.sessions.get(name);
+    if (!record) {
+      throw new Error(`Session "${name}" not found.`);
+    }
+
+    record.engineInstance.cancel();
+    record.phase = 'idle';
+    record.updatedAt = Date.now();
+    syncSession(record);
+    this.log.info('session', `Cancelled in-flight operation for "${name}"`, { session: name, engine: record.session.engine });
+    return this.requireSessionInfo(name);
   }
 
   listSessions(): SessionInfo[] {

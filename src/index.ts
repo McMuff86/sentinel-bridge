@@ -41,6 +41,8 @@ export { SessionEventStore } from './sessions/session-events.js';
 export { SessionMutex } from './sessions/session-mutex.js';
 export { StructuredLogger } from './logging.js';
 export type { LogLevel, LogCategory, LogEntry, ExternalLogger } from './logging.js';
+export { EngineError, toEngineError } from './errors.js';
+export type { ErrorCategory } from './errors.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok';
 
@@ -382,6 +384,30 @@ function buildTools(): ToolDef[] {
           name,
           count: events.length,
           events,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_session_cancel',
+      description:
+        'Cancel the current in-flight operation (send/compact) without stopping the session. ' +
+        'The session remains active and can receive new messages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Session name' },
+        },
+        required: ['name'],
+      },
+      handler: async (params, ctx) => {
+        const name = readRequiredString(params, 'name');
+        const session = ctx.manager.cancelSession(name);
+
+        return {
+          ok: true,
+          name,
+          status: session.status,
+          phase: session.activity.phase,
         } satisfies ToolHandlerResponse;
       },
     },

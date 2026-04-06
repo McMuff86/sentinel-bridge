@@ -7,6 +7,11 @@ import type {
   ModelPricing,
 } from "../types.js";
 import {
+  EngineError,
+  categorizeHttpStatus,
+  parseRetryAfterMs,
+} from "../errors.js";
+import {
   buildCompactPrompt,
   calculateLinearUsageCost,
   emptyTokenUsage,
@@ -30,6 +35,8 @@ type JsonRecord = Record<string, unknown>;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_BASE_URL = "https://api.x.ai/v1";
 const USD_TICKS_PER_DOLLAR = 10_000_000_000;
+const MAX_RETRIES = 3;
+const BASE_BACKOFF_MS = 1000;
 
 export class GrokEngine implements IEngine {
   private config: EngineConfig;
@@ -66,7 +73,7 @@ export class GrokEngine implements IEngine {
     if (!this.resolveApiKey()) {
       this.state = "error";
       this.usage.lastError = "Missing XAI API key. Set `XAI_API_KEY` or provide `apiKey`.";
-      throw new Error(this.usage.lastError);
+      throw new EngineError(this.usage.lastError, 'auth_expired');
     }
 
     if (!this.sessionId) {
@@ -93,7 +100,7 @@ export class GrokEngine implements IEngine {
     if (!apiKey) {
       this.state = "error";
       this.usage.lastError = "Missing XAI API key. Set `XAI_API_KEY` or provide `apiKey`.";
-      throw new Error(this.usage.lastError);
+      throw new EngineError(this.usage.lastError, 'auth_expired');
     }
 
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -105,53 +112,23 @@ export class GrokEngine implements IEngine {
     this.state = "running";
 
     try {
-      const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "x-grok-conv-id": this.sessionId ?? crypto.randomUUID(),
-        },
-        body: JSON.stringify({
-          model: this.config.model,
-          messages: nextMessages,
-          stream: false,
-        }),
-        signal: abortController.signal,
-      });
+      const result = await this.sendWithRetry(apiKey, nextMessages, abortController, timeoutMs);
 
-      const rawBody = await response.text();
-      const payload = this.tryParseJson(rawBody);
+      this.messages = [...nextMessages, result.assistantMessage];
 
-      if (!response.ok) {
-        throw this.createHttpError(response.status, payload, rawBody);
-      }
-
-      if (!payload) {
-        throw new Error("Grok API returned a non-JSON response.");
-      }
-
-      const assistantMessage = this.extractAssistantMessage(payload);
-      const responseText = this.extractMessageText(assistantMessage.content);
-      const usage = this.extractUsage(payload);
-      const usageCostUsd = this.extractUsageCost(payload);
-      const pricing = this.resolvePricing();
-
-      this.messages = [...nextMessages, assistantMessage];
-
-      if (usage) {
-        this.usage.tokenCount = mergeTokenUsage(this.usage.tokenCount, usage);
+      if (result.usage) {
+        this.usage.tokenCount = mergeTokenUsage(this.usage.tokenCount, result.usage);
       }
 
       this.usage.costUsd = roundUsd(
         this.usage.costUsd +
-          (usageCostUsd ?? calculateLinearUsageCost(pricing, usage)),
+          (result.usageCostUsd ?? calculateLinearUsageCost(this.resolvePricing(), result.usage)),
       );
       this.usage.lastError = undefined;
       this.usage.lastResponseAt = new Date();
       this.state = "running";
 
-      return responseText;
+      return result.text;
     } catch (error) {
       const normalizedError = this.normalizeError(error, timeoutMs);
       const s: string = this.state;
@@ -176,6 +153,16 @@ export class GrokEngine implements IEngine {
     ];
 
     return compactedSummary;
+  }
+
+  cancel(): void {
+    if (this.activeAbortController) {
+      this.activeAbortController.abort();
+      this.activeAbortController = null;
+    }
+    if (this.state === "running") {
+      this.state = "running"; // stay running — session is not destroyed
+    }
   }
 
   async stop(): Promise<void> {
@@ -205,6 +192,85 @@ export class GrokEngine implements IEngine {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  private async sendWithRetry(
+    apiKey: string,
+    messages: GrokMessage[],
+    abortController: AbortController,
+    timeoutMs: number,
+  ): Promise<{
+    text: string;
+    assistantMessage: GrokMessage;
+    usage: ReturnType<GrokEngine['extractUsage']>;
+    usageCostUsd: number | undefined;
+  }> {
+    let lastError: EngineError | undefined;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await this.sendOnce(apiKey, messages, abortController);
+      } catch (error) {
+        const engineError = error instanceof EngineError
+          ? error
+          : this.normalizeError(error, timeoutMs);
+
+        if (!engineError.retriable || attempt >= MAX_RETRIES) {
+          throw engineError;
+        }
+
+        lastError = engineError;
+        const backoffMs = engineError.retryAfterMs
+          ?? Math.min(BASE_BACKOFF_MS * Math.pow(2, attempt), 10_000);
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
+
+    throw lastError!;
+  }
+
+  private async sendOnce(
+    apiKey: string,
+    messages: GrokMessage[],
+    abortController: AbortController,
+  ): Promise<{
+    text: string;
+    assistantMessage: GrokMessage;
+    usage: ReturnType<GrokEngine['extractUsage']>;
+    usageCostUsd: number | undefined;
+  }> {
+    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "x-grok-conv-id": this.sessionId ?? crypto.randomUUID(),
+      },
+      body: JSON.stringify({
+        model: this.config.model,
+        messages,
+        stream: false,
+      }),
+      signal: abortController.signal,
+    });
+
+    const rawBody = await response.text();
+    const payload = this.tryParseJson(rawBody);
+
+    if (!response.ok) {
+      throw this.createHttpError(response.status, payload, rawBody, response);
+    }
+
+    if (!payload) {
+      throw new EngineError("Grok API returned a non-JSON response.", 'transient');
+    }
+
+    const assistantMessage = this.extractAssistantMessage(payload);
+    const text = this.extractMessageText(assistantMessage.content);
+    const usage = this.extractUsage(payload);
+    const usageCostUsd = this.extractUsageCost(payload);
+
+    return { text, assistantMessage, usage, usageCostUsd };
   }
 
   private resolveApiKey(): string | undefined {
@@ -373,39 +439,50 @@ export class GrokEngine implements IEngine {
     status: number,
     payload: JsonRecord | undefined,
     rawBody: string,
-  ): Error {
+    response?: { headers?: { get?(name: string): string | null } },
+  ): EngineError {
     const fallbackMessage = rawBody.trim() || `HTTP ${status}`;
     const message =
       toStringValue(payload?.error) ??
       toStringValue(this.getNestedValue(payload, ["error", "message"])) ??
       fallbackMessage;
 
-    if (status === 401 || status === 403) {
-      return new Error(
+    const category = categorizeHttpStatus(status);
+    const retryAfterMs = parseRetryAfterMs(response?.headers?.get?.("retry-after"));
+
+    if (category === 'auth_expired') {
+      return new EngineError(
         "Grok authentication appears to be invalid or expired. Check `XAI_API_KEY`.",
+        'auth_expired',
+        { httpStatus: status },
       );
     }
 
-    return new Error(`Grok API request failed (${status}): ${message}`);
+    return new EngineError(
+      `Grok API request failed (${status}): ${message}`,
+      category,
+      { httpStatus: status, retryAfterMs },
+    );
   }
 
-  private normalizeError(error: unknown, timeoutMs: number): Error {
+  private normalizeError(error: unknown, timeoutMs: number): EngineError {
+    if (error instanceof EngineError) {
+      return error;
+    }
+
     if (
       error instanceof Error &&
       error.name === "AbortError"
     ) {
       if (this.state === "stopping" || this.state === "stopped") {
-        return new Error("Grok request was stopped.");
+        return new EngineError("Grok request was stopped.", 'cancelled');
       }
 
-      return new Error(`Grok request timed out after ${timeoutMs}ms.`);
+      return new EngineError(`Grok request timed out after ${timeoutMs}ms.`, 'timeout');
     }
 
-    if (error instanceof Error) {
-      return error;
-    }
-
-    return new Error(String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    return new EngineError(message, 'unknown', { cause: error });
   }
 
   private getNestedValue(record: JsonRecord | undefined, path: string[]): unknown {

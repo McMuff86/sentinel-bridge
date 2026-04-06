@@ -14,7 +14,7 @@ describe('activate', () => {
 
     activate(mockApi);
 
-    expect(registered).toHaveLength(12);
+    expect(registered).toHaveLength(13);
     expect(registered).toContain('sb_session_start');
     expect(registered).toContain('sb_session_send');
     expect(registered).toContain('sb_session_stop');
@@ -27,6 +27,7 @@ describe('activate', () => {
     expect(registered).toContain('sb_cost_report');
     expect(registered).toContain('sb_compact');
     expect(registered).toContain('sb_session_events');
+    expect(registered).toContain('sb_session_cancel');
   });
 
   it('registers claude and codex CLI backends', () => {

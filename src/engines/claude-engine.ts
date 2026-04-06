@@ -8,6 +8,7 @@ import type {
   IEngine,
   ModelPricing,
 } from "../types.js";
+import { EngineError } from "../errors.js";
 import {
   buildCompactPrompt,
   emptyTokenUsage,
@@ -151,6 +152,17 @@ export class ClaudeEngine implements IEngine {
 
   async compact(summary?: string): Promise<string> {
     return this.send(buildCompactPrompt(summary));
+  }
+
+  cancel(): void {
+    if (this.activeProcess) {
+      this.activeProcess.kill("SIGTERM");
+      this.activeProcess = null;
+    }
+    // Stay in running state — session is preserved
+    if (this.state !== "stopped" && this.state !== "stopping") {
+      this.state = "running";
+    }
   }
 
   async stop(): Promise<void> {
@@ -524,37 +536,36 @@ export class ClaudeEngine implements IEngine {
     return text.trim();
   }
 
-  private createSpawnError(error: unknown): Error {
+  private createSpawnError(error: unknown): EngineError {
     if (this.isJsonRecord(error) && error.code === "ENOENT") {
-      return new Error(
+      return new EngineError(
         "Claude CLI not found. Install `claude` and ensure it is available on PATH.",
+        'unavailable',
       );
     }
 
-    if (error instanceof Error) {
-      return new Error(error.message || "Claude process failed to start.");
-    }
-
-    return new Error("Claude process failed to start.");
+    const message = error instanceof Error ? error.message : "Claude process failed to start.";
+    return new EngineError(message || "Claude process failed to start.", 'unknown', { cause: error });
   }
 
   private createProcessError(
     stderr: string,
     code: number | null,
     signal: string | null,
-  ): Error {
+  ): EngineError {
     const trimmed = stderr.trim();
 
     if (
       /auth|login|expired|unauthorized|forbidden|credential/i.test(trimmed)
     ) {
-      return new Error(
+      return new EngineError(
         "Claude authentication appears to be expired. Re-authenticate the Claude CLI.",
+        'auth_expired',
       );
     }
 
     const detail = trimmed || `exit code ${code ?? "unknown"} signal ${signal ?? "none"}`;
-    return new Error(`Claude command failed: ${detail}`);
+    return new EngineError(`Claude command failed: ${detail}`, 'unknown');
   }
 
   private getNestedValue(record: JsonRecord, path: string[]): unknown {
