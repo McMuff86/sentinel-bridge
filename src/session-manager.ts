@@ -26,6 +26,9 @@ import {
 import { SessionEventStore } from './sessions/session-events.js';
 import type { SessionEvent } from './sessions/session-events.js';
 import { SessionStore } from './sessions/session-store.js';
+import { SessionMutex } from './sessions/session-mutex.js';
+import { StructuredLogger } from './logging.js';
+import type { ExternalLogger } from './logging.js';
 import type { SessionRecord } from './sessions/types.js';
 import type {
   CostReport,
@@ -63,13 +66,17 @@ export class SessionManager {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly config: SentinelBridgeConfig;
   private readonly store = new SessionStore();
+  private readonly mutex = new SessionMutex();
+  private readonly rehydrating = new Set<string>();
   readonly events = new SessionEventStore();
+  readonly log: StructuredLogger;
   private cleanupTimer: {
     unref?: () => void;
   } | null = null;
 
-  constructor(config: SentinelBridgeConfig = {}) {
+  constructor(config: SentinelBridgeConfig = {}, externalLogger?: ExternalLogger) {
     this.config = config;
+    this.log = new StructuredLogger(externalLogger);
 
     const cleanupIntervalMs =
       config.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
@@ -104,6 +111,12 @@ export class SessionManager {
       fallbackChain: enginesToTry,
     });
 
+    this.log.info('routing', `Routing session "${options.name}": primary=${primaryEngine}, chain=[${enginesToTry.join(',')}]`, {
+      session: options.name,
+      engine: primaryEngine,
+      meta: { requestedModel: options.model, requestedEngine: options.engine },
+    });
+
     let lastError: unknown;
     for (let index = 0; index < enginesToTry.length; index++) {
       const engine = enginesToTry[index]!;
@@ -126,8 +139,18 @@ export class SessionManager {
         const info = this.requireSessionInfo(options.name);
         this.store.upsert(info);
         this.emit('session_started', options.name, engine);
+        this.log.info('session', `Session "${options.name}" started on ${engine}/${route.model}`, {
+          session: options.name,
+          engine,
+        });
         return info;
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        this.log.warn('fallback', `Engine ${engine} failed for "${options.name}": ${errMsg}`, {
+          session: options.name,
+          engine,
+          meta: { attempt: index + 1, model: route.model },
+        });
         appendRoutingAttempt(
           routingTrace,
           toRoutingAttempt({ engine, model: route.model, error }),
@@ -147,6 +170,15 @@ export class SessionManager {
 
   async sendMessage(name: string, message: string): Promise<SendMessageResult> {
     validateSessionName(name);
+    const release = await this.mutex.acquire(name);
+    try {
+      return await this.sendMessageInner(name, message);
+    } finally {
+      release();
+    }
+  }
+
+  private async sendMessageInner(name: string, message: string): Promise<SendMessageResult> {
     const record = this.requireSession(name);
     const prevCost = record.session.costUsd;
     const prevTokens = { ...record.session.tokenCount };
@@ -160,8 +192,10 @@ export class SessionManager {
     try {
       output = await this.send(name, message);
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.log.error('engine', `Send failed for "${name}": ${errMsg}`, { session: name, engine: record.session.engine });
       this.emit('message_failed', name, record.session.engine, {
-        error: error instanceof Error ? error.message : String(error),
+        error: errMsg,
       });
       throw error;
     }
@@ -199,7 +233,12 @@ export class SessionManager {
 
   async stopSession(name: string): Promise<void> {
     validateSessionName(name);
-    await this.stop(name);
+    const release = await this.mutex.acquire(name);
+    try {
+      await this.stop(name);
+    } finally {
+      release();
+    }
   }
 
   listSessions(): SessionInfo[] {
@@ -353,6 +392,18 @@ export class SessionManager {
     summary?: string,
   ): Promise<SendMessageResult> {
     validateSessionName(name);
+    const release = await this.mutex.acquire(name);
+    try {
+      return await this.compactSessionInner(name, summary);
+    } finally {
+      release();
+    }
+  }
+
+  private async compactSessionInner(
+    name: string,
+    summary?: string,
+  ): Promise<SendMessageResult> {
     this.cleanupExpiredSessions();
 
     const record = this.requireSession(name);
@@ -526,7 +577,10 @@ export class SessionManager {
       this.sessions.delete(name);
       this.store.delete(name);
       this.emit('session_stopped', name, record.session.engine);
+      this.log.info('session', `Session "${name}" stopped`, { session: name, engine: record.session.engine });
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.log.error('session', `Failed to stop session "${name}": ${errMsg}`, { session: name, engine: record.session.engine });
       record.lastTouchedAt = Date.now();
       record.phase = 'idle';
       record.updatedAt = Date.now();
@@ -579,6 +633,7 @@ export class SessionManager {
     const expiredSessionNames = cleanupExpiredSessions(this.sessions, ttlMs, now);
     for (const name of expiredSessionNames) {
       this.store.delete(name);
+      this.log.info('expiry', `Expired in-memory session "${name}"`, { session: name });
     }
 
     // Clean up persisted sessions that expired while plugin was offline
@@ -588,6 +643,7 @@ export class SessionManager {
       if (now - session.lastTouchedAt.getTime() >= ttlMs) {
         this.store.delete(session.name);
         this.events.clearEvents(session.name);
+        this.log.info('expiry', `Purged persisted expired session "${session.name}"`, { session: session.name, engine: session.engine });
       }
     }
   }
@@ -661,6 +717,26 @@ export class SessionManager {
   }
 
   private async rehydrateSession(session: SessionInfo): Promise<SessionRecord> {
+    if (this.rehydrating.has(session.name)) {
+      this.log.warn('rehydration', `Rehydration already in progress for "${session.name}", rejecting duplicate`, { session: session.name, engine: session.engine });
+      throw new Error(`Rehydration already in progress for session "${session.name}".`);
+    }
+    this.rehydrating.add(session.name);
+    this.log.info('rehydration', `Rehydrating session "${session.name}" on ${session.engine}`, { session: session.name, engine: session.engine });
+    try {
+      const record = await this.rehydrateSessionInner(session);
+      this.log.info('rehydration', `Session "${session.name}" rehydrated successfully`, { session: session.name, engine: session.engine });
+      return record;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.log.error('rehydration', `Failed to rehydrate "${session.name}": ${errMsg}`, { session: session.name, engine: session.engine });
+      throw error;
+    } finally {
+      this.rehydrating.delete(session.name);
+    }
+  }
+
+  private async rehydrateSessionInner(session: SessionInfo): Promise<SessionRecord> {
     const resolvedConfig = this.resolveEngineConfig(session.engine, {
       model: session.model,
       cwd: session.cwd ?? undefined,

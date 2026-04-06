@@ -38,6 +38,9 @@ export type {
 } from './types.js';
 export type { SessionEvent, SessionEventType } from './sessions/session-events.js';
 export { SessionEventStore } from './sessions/session-events.js';
+export { SessionMutex } from './sessions/session-mutex.js';
+export { StructuredLogger } from './logging.js';
+export type { LogLevel, LogCategory, LogEntry, ExternalLogger } from './logging.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok';
 
@@ -397,7 +400,7 @@ export function activate(api: PluginApi): void {
   const config = mergePluginConfig(DEFAULT_CONFIG, userConfig);
   const ctx: PluginContext = {
     config,
-    manager: new SessionManager(toSessionManagerConfig(config)),
+    manager: new SessionManager(toSessionManagerConfig(config), api.logger),
   };
 
   const tools = buildTools();
