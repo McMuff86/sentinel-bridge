@@ -56,27 +56,32 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  OpenClaw Host                   │
-│                                                  │
-│  ┌─────────────────────────────────────────────┐ │
-│  │            sentinel-bridge                  │ │
-│  │                                             │ │
-│  │  Tools (sb_*)  →  SessionManager            │ │
-│  │                    ├── Session #1            │ │
-│  │                    ├── Session #2            │ │
-│  │                    └── ...                   │ │
-│  │                                             │ │
-│  │            ┌── IEngine Interface ──┐        │ │
-│  │            │                       │        │ │
-│  │     Claude Engine   Codex Engine   Grok     │ │
-│  │            │            │        Engine     │ │
-│  └────────────┼────────────┼──────────┼────────┘ │
-│               │            │          │          │
-└───────────────┼────────────┼──────────┼──────────┘
-                │            │          │
-         claude CLI     codex CLI   xAI HTTP API
-        (subscription)  (API key)    (API key)
+┌───────────────────────────────────────────────────────┐
+│                     OpenClaw Host                      │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │               sentinel-bridge                     │  │
+│  │                                                   │  │
+│  │  Tools (sb_*)  →  SessionManager (mutex-locked)   │  │
+│  │                    ├── Session #1                  │  │
+│  │                    ├── Session #2                  │  │
+│  │                    └── ...                        │  │
+│  │                                                   │  │
+│  │            ┌── IEngine Interface ──┐              │  │
+│  │            │                       │              │  │
+│  │     Claude Engine   Codex Engine   Grok Engine    │  │
+│  │            │            │          │ (retry)      │  │
+│  │                                                   │  │
+│  │  ┌─────────────────────────────────────────────┐  │  │
+│  │  │  SessionStore   EventStore   StructuredLog  │  │  │
+│  │  │  (atomic JSON)  (JSONL)      (JSON→logger)  │  │  │
+│  │  └─────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────┘  │
+│                                                        │
+└────────────┬───────────┬───────────┬──────────────────┘
+             │           │           │
+      claude CLI    codex CLI   xAI HTTP API
+     (subscription)  (API key)    (API key)
 ```
 
 ## Features
@@ -84,8 +89,14 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 - **Multi-engine sessions** — Claude, Codex, and Grok through one interface
 - **Routing layer** — model aliases, engine inference, light capability-based primary selection, configurable start fallback chains, and routing trace metadata
 - **Session continuity** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
-- **Observability** — per-session status, routing decisions, token usage, and cost tracking
-- **Plugin surface** — `sb_*` tools for session lifecycle, engines, routing, cost, and compact
+- **Error categorization** — typed `EngineError` with categories (`rate_limited`, `timeout`, `unavailable`, `auth_expired`, etc.) and `retriable` flag for intelligent fallback decisions
+- **Grok retry** — exponential backoff (up to 3 retries) for rate-limited and transient errors, respects `Retry-After`
+- **Session cancel** — abort in-flight operations without destroying the session
+- **Concurrency safety** — per-session mutex serialises send/stop/compact; rehydration deduplication
+- **Persistence** — sessions survive plugin restarts via atomic JSON store writes; JSONL event timeline per session
+- **Structured logging** — JSON log entries with level, category, session context; integrates with OpenClaw's plugin logger
+- **Observability** — per-session status, routing decisions, token usage, cost tracking, and event timeline
+- **Plugin surface** — 13 `sb_*` tools for session lifecycle, engines, routing, cost, compact, events, and cancel
 - **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
 ## Engines
@@ -100,13 +111,13 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 
 | Model | Aliases | Engine | Input/1M | Output/1M |
 |-------|---------|--------|----------|-----------|
-| claude-opus-4 | `opus` | Claude | $15.00* | $75.00* |
+| claude-opus-4-6 | `opus` | Claude | $15.00* | $75.00* |
 | claude-sonnet-4-5 | `sonnet` | Claude | $3.00* | $15.00* |
-| claude-haiku-4 | `haiku` | Claude | — | — |
-| o4-mini | — | Codex | $1.10 | $4.40 |
-| codex-mini | `codex-mini` | Codex | $1.50 | $6.00 |
+| claude-haiku-4-5 | `haiku` | Claude | — | — |
+| gpt-5.4 | `codex` | Codex | $2.50 | $15.00 |
+| o4-mini | — | Codex | $1.25 | $10.00 |
+| grok-4-1-fast | `grok-fast` | Grok | $0.20 | $0.50 |
 | grok-3 | `grok-3` | Grok | $3.00 | $15.00 |
-| grok-3-mini | `grok-mini` | Grok | $0.30 | $0.50 |
 
 _*Tracked for visibility but covered by subscription — actual cost is $0._
 
@@ -159,12 +170,16 @@ That makes it useful even when OpenClaw itself gains stronger native provider su
 
 ## Current internal shape
 
-The codebase is now intentionally split into a few small seams:
+The codebase is split into focused modules:
 
-- `src/routing/*` → model aliases, model resolution, fallback expansion, routing trace, provider capability hints
-- `src/engines/*` → engine adapters + engine factory
-- `src/sessions/*` → session cleanup, session info shaping, session record types
-- `src/session-manager.ts` → orchestration facade
+- `src/routing/*` — model aliases, model resolution, fallback expansion, routing trace, capability hints
+- `src/engines/*` — engine adapters (Claude CLI, Codex CLI, Grok HTTP) + engine factory + shared utilities
+- `src/sessions/*` — session store (atomic JSON), event store (JSONL), session mutex, cleanup, info shaping
+- `src/session-manager.ts` — orchestration facade (mutex-protected)
+- `src/errors.ts` — `EngineError` with typed categories and retry metadata
+- `src/logging.ts` — `StructuredLogger` with JSON entries, categories, external logger integration
+- `src/tracking.ts` — usage tracking with JSONL logging
+- `src/plugin.ts` — plugin metadata, config types, defaults
 
 ## Tools
 
@@ -175,9 +190,11 @@ Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for paramet
 | `sb_session_start` | Start a session (with optional start-time fallback chain) |
 | `sb_session_send` | Send a message to an active session |
 | `sb_session_stop` | Stop a session |
+| `sb_session_cancel` | Cancel in-flight operation without stopping the session |
 | `sb_session_list` | List sessions |
 | `sb_session_status` | Session details |
 | `sb_session_overview` | Aggregate overview + engine descriptors |
+| `sb_session_events` | Session event timeline (last N events) |
 | `sb_engine_list` / `sb_engine_status` | Engine health / PATH / API key |
 | `sb_model_route` | Resolve model → engine |
 | `sb_cost_report` | Cost aggregation |
@@ -196,9 +213,9 @@ Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for paramet
 
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Write tests (`npm test`)
+3. Write tests (`npx vitest run`)
 4. Ensure types pass (`npm run lint`)
-5. Open a PR
+5. Open a PR — CI runs tests automatically on push/PR to main
 
 Keep dependencies minimal — sentinel-bridge targets zero runtime dependencies beyond Node.js built-ins.
 

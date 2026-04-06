@@ -6,34 +6,41 @@ This file is for **future agents and contributors** so they can continue work wi
 
 OpenClaw plugin that exposes **Claude Code CLI**, **Codex CLI**, and **Grok (HTTP API)** behind one `SessionManager`. Tools live under the `sb_*` namespace in `src/index.ts`.
 
-The project is now being reshaped into four clear seams:
-- `routing/`
-- `engines/`
-- `sessions/`
-- `session-manager.ts` as orchestration facade
+The project is structured into focused modules:
+- `routing/` — model aliases, resolution, fallback expansion, routing trace, capability hints
+- `engines/` — engine adapters (Claude CLI, Codex CLI, Grok HTTP) + factory + shared utilities
+- `sessions/` — session store (atomic JSON), event store (JSONL), mutex, cleanup, info shaping
+- `session-manager.ts` — orchestration facade (mutex-protected)
+- `errors.ts` — `EngineError` with typed categories and retry metadata
+- `logging.ts` — `StructuredLogger` with JSON entries and external logger integration
 
-## Branch / merge situation (as of 2026-04)
+## Current state (as of 2026-04-06)
 
-- The earlier `feat/model-routing` work has been merged back into `main`.
-- A cleanup/refactor pass has already landed:
-  - routing extracted to `src/routing/*`
-  - engine factory extracted to `src/engines/create-engine.ts`
-  - session cleanup/info helpers extracted to `src/sessions/*`
-  - routing trace added for session starts
-
-If you continue from here, assume `main` is now the integration branch for the cleaner architecture.
+Architecture is stable. Recent work focused on robustness and productionisation:
+- Session-level mutex for concurrency safety
+- Atomic store writes to prevent data loss
+- Error categorization with `EngineError` class (8 categories, `retriable` flag)
+- Grok retry with exponential backoff for retriable errors
+- Session cancel (`sb_session_cancel`) for aborting in-flight operations
+- Structured logging at all key lifecycle points
+- Session name validation (path traversal prevention)
+- Event store hardening (malformed JSONL handling, auto-pruning)
+- CI via GitHub Actions (test on push/PR to main)
 
 ## Key code paths
 
 | Area | File | Notes |
 |------|------|--------|
-| Plugin entry | `src/index.ts` | `activate()`, tool table, `toSessionManagerConfig()` |
-| Orchestration | `src/session-manager.ts` | Thin facade: session lifecycle + coordination |
+| Plugin entry | `src/index.ts` | `activate()`, 13 tool handlers, config merge, logger wiring |
+| Orchestration | `src/session-manager.ts` | Mutex-protected facade: session lifecycle + coordination |
+| Errors | `src/errors.ts` | `EngineError` with typed `ErrorCategory` and `retriable` flag |
+| Logging | `src/logging.ts` | `StructuredLogger` with JSON entries and categories |
 | Routing | `src/routing/*` | aliases, resolution, fallback order, routing trace, capability hints |
-| Sessions | `src/sessions/*` | cleanup, session info shaping, shared session record types |
+| Sessions | `src/sessions/*` | store (atomic JSON), events (JSONL), mutex, cleanup, info shaping |
 | Plugin defaults | `src/plugin.ts` | `DEFAULT_CONFIG`, OpenClaw-facing config shape |
-| Shared types | `src/types.ts` | `EngineKind`, `SentinelBridgeConfig`, `ModelRoute`, etc. |
-| Engines | `src/engines/*.ts` | **Isolated** per engine; SessionManager instantiates them |
+| Shared types | `src/types.ts` | `IEngine`, `EngineKind`, `SentinelBridgeConfig`, `ModelRoute`, etc. |
+| Engines | `src/engines/*.ts` | **Isolated** per engine; throw `EngineError`; Grok has retry logic |
+| Tracking | `src/tracking.ts` | JSONL usage logging, per-session/engine/day summaries |
 
 ## Model routing (current behavior)
 
@@ -62,12 +69,15 @@ Engine unit tests under `src/__tests__/` are not all present in minimal checkout
 
 ## Suggested next tasks
 
-- Use `src/routing/provider-capabilities.ts` as the basis for future capability-based routing rules.
-- `src/engines/grok-engine.ts` — HTTP hardening, errors, rate limits (medium).
-- Align plugin default model strings with alias targets if product wants one canonical Opus id everywhere.
-- Integration tests (manual): real `claude` / `codex` binaries and `XAI_API_KEY` for Grok.
+- **Config schema consolidation** — three separate config representations (plugin.json, plugin.ts, types.ts) → single source of truth (e.g. Zod schema → type + validation + defaults).
+- **Integration tests** (manual): real `claude` / `codex` binaries and `XAI_API_KEY` for Grok.
+- **Engine health-check** — active ping before session start to reduce start failures.
+- **npm publish story** — clean install path for community.
+- Expand `src/routing/provider-capabilities.ts` for richer capability-based routing rules.
 
 ## Conventions reminder
 
-- English-only in code; log via OpenClaw `api.logger` from `index.ts` (SessionManager has no logger today).
+- English-only in code.
+- Log via `StructuredLogger` (`this.log.info/warn/error(category, message, context)`).
+- Throw `EngineError` with typed categories, not plain `Error`.
 - ESM, strict TS, single quotes, semicolons per [AGENTS.md](../AGENTS.md).
