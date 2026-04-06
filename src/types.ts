@@ -84,6 +84,8 @@ export interface IEngine {
   send(message: string): Promise<string>;
   compact(summary?: string): Promise<string>;
   stop(): Promise<void>;
+  /** Cancel the current in-flight operation without stopping the session. */
+  cancel(): void;
   status(): EngineStatusSnapshot;
   getSessionId(): string | null;
 }

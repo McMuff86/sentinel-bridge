@@ -90,7 +90,8 @@
       "sb_model_route",
       "sb_cost_report",
       "sb_compact",
-      "sb_session_events"
+      "sb_session_events",
+      "sb_session_cancel"
     ],
     "exports": {
       "activate": "activate"
