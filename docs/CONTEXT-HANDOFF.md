@@ -4,35 +4,48 @@ This file is for **future agents and contributors** so they can continue work wi
 
 ## What this project is
 
-OpenClaw plugin that exposes **Claude Code CLI**, **Codex CLI**, and **Grok (HTTP API)** behind one `SessionManager`. Tools live under the `sb_*` namespace in `src/index.ts`.
+OpenClaw plugin that exposes **Claude Code CLI**, **Codex CLI**, **Grok (HTTP API)**, and **Ollama (local LLM)** behind one `SessionManager` with a full multi-agent orchestration layer. 28 tools in the `sb_*` namespace in `src/index.ts`.
 
 The project is structured into focused modules:
+- `orchestration/` — multi-agent coordination: workflows (DAG), roles (4 built-in + custom), shared context (blackboard), relay (session-to-session), task-based routing (heuristic classifier)
 - `routing/` — model aliases, resolution, fallback expansion, routing trace, capability hints
-- `engines/` — engine adapters (Claude CLI, Codex CLI, Grok HTTP) + factory + shared utilities
+- `engines/` — engine adapters (Claude CLI, Codex CLI, Grok HTTP, Ollama HTTP/SSE) + factory + shared utilities
 - `sessions/` — session store (atomic JSON), event store (JSONL), mutex, cleanup, info shaping
-- `session-manager.ts` — orchestration facade (mutex-protected)
+- `session-manager.ts` — central orchestrator (sessions, context, roles, workflows, relay)
 - `errors.ts` — `EngineError` with typed categories and retry metadata
 - `logging.ts` — `StructuredLogger` with JSON entries and external logger integration
 
-## Current state (as of 2026-04-06)
+## Current state (as of 2026-04-07)
 
-Architecture is stable. Recent work focused on robustness and productionisation:
+Architecture is stable with a full multi-agent orchestration layer on top of the session manager.
+
+**Session layer (stable):**
 - Session-level mutex for concurrency safety
 - Atomic store writes to prevent data loss
 - Error categorization with `EngineError` class (8 categories, `retriable` flag)
-- Grok retry with exponential backoff for retriable errors
+- Grok/Ollama retry with exponential backoff for retriable errors
 - Session cancel (`sb_session_cancel`) for aborting in-flight operations
 - Structured logging at all key lifecycle points
-- Session name validation (path traversal prevention)
-- Event store hardening (malformed JSONL handling, auto-pruning)
 - CI via GitHub Actions (test on push/PR to main)
+
+**Orchestration layer (new):**
+- Shared context/blackboard — workspace-scoped KV store, atomic JSON, JSONL audit
+- Agent roles — 4 built-in (Architect, Implementer, Reviewer, Tester) + custom, system prompt injection
+- Message relay + broadcast — session-to-session messaging, `Promise.allSettled` for fault tolerance
+- Workflow DAG engine — dependency resolution, parallel execution, pipeline/fan-out templates
+- Content-based task routing — heuristic classifier, cost-aware, `fast`/`cheap`/`capable` modes
 
 ## Key code paths
 
 | Area | File | Notes |
 |------|------|--------|
-| Plugin entry | `src/index.ts` | `activate()`, 13 tool handlers, config merge, logger wiring |
-| Orchestration | `src/session-manager.ts` | Mutex-protected facade: session lifecycle + coordination |
+| Plugin entry | `src/index.ts` | `activate()`, 28 tool handlers, config merge, logger wiring |
+| Orchestration | `src/session-manager.ts` | Central orchestrator: sessions + context + roles + workflows + relay |
+| Workflows | `src/orchestration/workflow-engine.ts` | DAG validation, topological execution, failure cascading |
+| Roles | `src/orchestration/roles.ts` | 4 built-in roles, RoleRegistry, system prompt injection |
+| Context | `src/orchestration/context-store.ts` | Shared blackboard per workspace, atomic JSON |
+| Relay | `src/orchestration/relay.ts` | Session-to-session messaging types |
+| Task Router | `src/orchestration/task-router.ts` | Content-based engine recommendation |
 | Errors | `src/errors.ts` | `EngineError` with typed `ErrorCategory` and `retriable` flag |
 | Logging | `src/logging.ts` | `StructuredLogger` with JSON entries and categories |
 | Routing | `src/routing/*` | aliases, resolution, fallback order, routing trace, capability hints |
@@ -69,11 +82,13 @@ Engine unit tests under `src/__tests__/` are not all present in minimal checkout
 
 ## Suggested next tasks
 
-- **Config schema consolidation** — three separate config representations (plugin.json, plugin.ts, types.ts) → single source of truth (e.g. Zod schema → type + validation + defaults).
-- **Integration tests** (manual): real `claude` / `codex` binaries and `XAI_API_KEY` for Grok.
-- **Engine health-check** — active ping before session start to reduce start failures.
+- **Workflow recovery** — persist running workflow state so interrupted workflows can resume after restart.
+- **Circuit breaker** — disable engines after N consecutive failures, re-enable after cooldown.
+- **Agent-to-agent subscriptions** — pub/sub pattern where sessions subscribe to topics.
+- **Config schema consolidation** — three separate config representations (plugin.json, plugin.ts, types.ts) → single source of truth.
+- **Integration tests** (manual): real `claude` / `codex` / Ollama binaries for live workflow tests.
 - **npm publish story** — clean install path for community.
-- Expand `src/routing/provider-capabilities.ts` for richer capability-based routing rules.
+- See [ROADMAP.md](../ROADMAP.md) for the full future enhancement list.
 
 ## Conventions reminder
 

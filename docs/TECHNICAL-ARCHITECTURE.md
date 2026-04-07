@@ -3,39 +3,41 @@
 ## System Overview
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        OpenClaw Host                         │
-│                                                              │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                   sentinel-bridge                      │  │
-│  │                   (OpenClaw Plugin)                     │  │
-│  │                                                        │  │
-│  │  ┌──────────────┐    ┌─────────────────────────────┐   │  │
-│  │  │ Tool Layer   │───▶│     SessionManager          │   │  │
-│  │  │ (sb_*)       │    │                             │   │  │
-│  │  └──────────────┘    │  ┌───────┐ ┌───────┐       │   │  │
-│  │                      │  │Session│ │Session│ ...    │   │  │
-│  │                      │  │  #1   │ │  #2   │       │   │  │
-│  │                      │  └───┬───┘ └───┬───┘       │   │  │
-│  │                      └─────┼─────────┼────────────┘   │  │
-│  │                            │         │                 │  │
-│  │              ┌─────────────┼─────────┼──────────┐     │  │
-│  │              │       IEngine Interface           │     │  │
-│  │              └─────────────┼─────────┼──────────┘     │  │
-│  │                            │         │                 │  │
-│  │         ┌──────────┐ ┌────┴───┐ ┌───┴──────┐         │  │
-│  │         │  Claude   │ │ Codex  │ │   Grok   │         │  │
-│  │         │  Engine   │ │ Engine │ │  Engine  │         │  │
-│  │         └─────┬─────┘ └───┬────┘ └────┬─────┘         │  │
-│  │               │           │           │                │  │
-│  └───────────────┼───────────┼───────────┼────────────────┘  │
-│                  │           │           │                    │
-└──────────────────┼───────────┼───────────┼────────────────────┘
-                   │           │           │
-           ┌───────▼──┐  ┌────▼────┐  ┌───▼─────┐
-           │claude CLI│  │codex CLI│  │xAI HTTP │
-           │(sub auth)│  │(API key)│  │(API key)│
-           └──────────┘  └─────────┘  └─────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                           OpenClaw Host                              │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                       sentinel-bridge                          │  │
+│  │                       (OpenClaw Plugin)                         │  │
+│  │                                                                 │  │
+│  │  ┌──────────────┐    ┌───────────────────────────────────────┐  │  │
+│  │  │ Tool Layer   │───▶│         SessionManager                │  │  │
+│  │  │ (28 sb_*)    │    │                                       │  │  │
+│  │  └──────────────┘    │  Sessions    Workflows    Context     │  │  │
+│  │                      │  ┌──┐┌──┐   ┌─────┐    ┌─────────┐  │  │  │
+│  │                      │  │#1││#2│   │ DAG │    │Blackboard│  │  │  │
+│  │                      │  └──┘└──┘   └─────┘    └─────────┘  │  │  │
+│  │                      │  Roles      Relay      TaskRouter    │  │  │
+│  │                      │  ┌──────┐   ┌─────┐   ┌─────────┐  │  │  │
+│  │                      │  │4+cust│   │P2P  │   │heuristic│  │  │  │
+│  │                      │  └──────┘   └─────┘   └─────────┘  │  │  │
+│  │                      └──────────────────────────────────────┘  │  │
+│  │                                                                 │  │
+│  │              ┌─────── IEngine Interface ──────────┐             │  │
+│  │              │                                    │             │  │
+│  │     Claude Engine  Codex Engine  Grok Engine  Ollama Engine     │  │
+│  │     (subprocess)   (per-message) (HTTP+retry) (HTTP+SSE)       │  │
+│  │                                                                 │  │
+│  │  ┌──────────────────────────────────────────────────────────┐  │  │
+│  │  │  SessionStore  EventStore  StructuredLog  UsageTracker   │  │  │
+│  │  │  (atomic JSON) (JSONL)     (JSON→logger)  (JSONL)        │  │  │
+│  │  └──────────────────────────────────────────────────────────┘  │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+└──────────┬───────────┬───────────┬──────────┬───────────────────────┘
+           │           │           │          │
+    claude CLI    codex CLI   xAI HTTP   Ollama HTTP
+   (subscription) (subscription) (API key)   (local)
 ```
 
 ## IEngine Interface
@@ -134,6 +136,40 @@ cancel() → abort AbortController → stay running
 stop()   → abort + state = stopped
 ```
 
+## Orchestration Layer
+
+The `src/orchestration/` directory contains the multi-agent orchestration features that sit on top of the SessionManager:
+
+### WorkflowEngine (`workflow-engine.ts`)
+- Validates workflow definitions (DAG cycle detection via DFS, dependency resolution)
+- Executes steps in topological order with parallel execution for independent steps
+- Propagates upstream outputs to downstream steps via the blackboard
+- Handles failure cascading (failed step → dependent steps marked `skipped`)
+
+### RoleRegistry (`roles.ts`) + RoleStore (`role-store.ts`)
+- 4 built-in roles: Architect (design focus), Implementer (code generation), Reviewer (code review), Tester (testing)
+- Each role has `systemPrompt`, optional `preferredEngine`/`preferredModel`, and `tags`
+- Custom roles registered at runtime and persisted via atomic JSON
+- On `startSession()` with a role: preferred engine/model applied as defaults, system prompt injected as first message
+
+### ContextStore (`context-store.ts`) + ContextEventStore (`context-events.ts`)
+- Workspace-scoped key-value store (atomic JSON per workspace)
+- Any session can read/write; workspace-level mutex prevents concurrent writes
+- JSONL audit trail for all mutations (`context_set`, `context_deleted`, `context_cleared`)
+- Workflow steps automatically store outputs in the blackboard for downstream consumption
+
+### Relay (`relay.ts`)
+- `relayMessage(from, to, message)` sends a message to a target session via existing `sendMessage` (inherits all guarantees)
+- `broadcastMessage(from, message, exclude?)` sends to all active sessions via `Promise.allSettled`
+- Relay events tracked on both source and target session timelines
+
+### TaskRouter (`task-router.ts`) + TaskClassifier (`task-classifier.ts`)
+- Heuristic keyword/pattern classifier: `code_generation`, `code_review`, `reasoning`, `fast_task`, `creative`, `local_private`, `general`
+- Engine scoring based on capability strengths (code, reasoning, speed, privacy)
+- Cost-aware tiebreaking via `cost-tiers.ts`
+- Supports `prefer` parameter: `fast`, `cheap`, `capable`
+- Advisory only — does not start sessions
+
 ## SessionManager
 
 The SessionManager is the central orchestrator. It owns all active sessions and provides the API surface that tools call. Delegates to focused modules:
@@ -151,7 +187,7 @@ The SessionManager is the central orchestrator. It owns all active sessions and 
 ```typescript
 class SessionManager {
   // ── Session Lifecycle (mutex-protected) ────────────
-  startSession(opts: SessionStartOptions): Promise<SessionInfo>;
+  startSession(opts: SessionStartOptions): Promise<SessionInfo>;  // now accepts role
   sendMessage(name: string, message: string): Promise<SendMessageResult>;
   stopSession(name: string): Promise<void>;
   cancelSession(name: string): SessionInfo;
@@ -163,6 +199,26 @@ class SessionManager {
   getOverview(): SessionOverview;
   getCostReport(since?: string): CostReport;
   resolveModelRoute(model: string, preferredEngine?: EngineKind): ModelRoute;
+
+  // ── Workflow Orchestration ─────────────────────────
+  startWorkflow(definition: WorkflowDefinition): Promise<WorkflowState>;
+  getWorkflowStatus(id: string): WorkflowState | undefined;
+  cancelWorkflow(id: string): WorkflowState;
+  listWorkflows(): WorkflowState[];
+
+  // ── Relay ──────────────────────────────────────────
+  relayMessage(from, to, message, onChunk?): Promise<RelayResult>;
+  broadcastMessage(from, message, exclude?): Promise<BroadcastResult>;
+
+  // ── Roles ──────────────────────────────────────────
+  registerRole(role: AgentRole): void;
+  readonly roles: RoleRegistry;
+
+  // ── Context (Blackboard) ───────────────────────────
+  setContext(workspace, key, value, setBy): Promise<ContextEntry>;
+  getContext(workspace, key): ContextEntry | undefined;
+  listContext(workspace): ContextEntry[];
+  clearContext(workspace, clearedBy): Promise<void>;
 
   // ── Cleanup ────────────────────────────────────────
   shutdown(): Promise<void>;

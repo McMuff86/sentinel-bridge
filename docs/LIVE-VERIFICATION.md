@@ -18,7 +18,7 @@ Use this checklist **before** you rely on the plugin in production or in your ap
 1. Install or link the plugin the way your OpenClaw version expects (path vs npm).
 2. Enable the plugin and merge config that matches **`src/plugin.ts`** (nested `engines`, `sessionTTLMs` in ms, `defaultFallbackChain` if desired).
 3. Restart the OpenClaw host and confirm logs show something like:  
-   `[sentinel-bridge] activated with 11 registered tools.`
+   `[sentinel-bridge] activated with 28 registered tools.`
 
 ## 3. Minimal Claude path (manual)
 
@@ -45,6 +45,7 @@ Execute via OpenClaw’s tool UI, agent, or debug console — **exact UI depends
 |--------|----------------|
 | **Codex** | `codex` on PATH; verified path prefers `codex login status` / ChatGPT login and should avoid inherited API-key envs in subscription mode. Repeat steps 2–4 with `engine: "codex"`. |
 | **Grok** | Set `engines.grok.enabled: true` and `apiKey` or `XAI_API_KEY`; repeat with `engine: "grok"`. |
+| **Ollama** | `ollama serve` running; model pulled (`ollama pull llama3.2`); repeat with `engine: "ollama"`. |
 
 ## 5. Fallback chain (start only)
 
@@ -52,13 +53,33 @@ Execute via OpenClaw’s tool UI, agent, or debug console — **exact UI depends
 2. `sb_session_start` with `model: "opus"` (routes to Claude first) should **fail** Claude then **succeed** on Codex if `defaultFallbackChain` includes `codex`.
 3. Restore Claude config after the test.
 
-## 6. App / skill alignment
+## 6. Orchestration features
+
+### Roles
+1. **`sb_role_list`** — should return 4+ built-in roles (architect, implementer, reviewer, tester).
+2. **`sb_session_start`** — `{ "name": "role-test", "engine": "claude", "role": "architect" }` — should start session and inject system prompt.
+3. Verify `sb_session_status` shows `role: "architect"` in the session info.
+
+### Context (Blackboard)
+1. **`sb_context_set`** — `{ "workspace": "test-ws", "key": "greeting", "value": "hello", "session": "role-test" }`
+2. **`sb_context_get`** — `{ "workspace": "test-ws", "key": "greeting" }` — should return the value.
+3. **`sb_context_clear`** — `{ "workspace": "test-ws", "session": "role-test" }` — should clear all entries.
+
+### Relay
+1. Start two sessions: `agent-a` and `agent-b`.
+2. **`sb_session_relay`** — `{ "from": "agent-a", "to": "agent-b", "message": "hello from A" }` — should return response from agent-b.
+
+### Task Routing
+1. **`sb_route_task`** — `{ "task": "implement a REST API endpoint" }` — should recommend an engine/model.
+2. **`sb_route_task`** — `{ "task": "process this sensitive data locally", "prefer": "cheap" }` — should recommend Ollama.
+
+## 7. App / skill alignment
 
 - [ ] Skill or app calls the **real** tool names from [API-REFERENCE.md](./API-REFERENCE.md) (not legacy names like `sb_session_compact`).
 - [ ] Config keys match **`plugin.ts`** / [configuration.md](./configuration.md) (ms TTL, `engines.*`, `defaultFallbackChain`).
 - [ ] You have one **documented** OpenClaw version + plugin version pair that you tested.
 
-## 7. After verification
+## 8. After verification
 
 Record: date, OpenClaw version, `claude` CLI version, `codex` CLI version, Node version, and pass/fail per section — helps the next merge or agent pick up without re-discovery.
 

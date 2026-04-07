@@ -4,7 +4,30 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
-### Added
+### Added — Multi-Agent Orchestration Layer
+- **Shared context (blackboard)** — workspace-scoped key-value store for
+  cross-session data sharing. 4 new tools: `sb_context_set`, `sb_context_get`,
+  `sb_context_list`, `sb_context_clear`. Atomic JSON persistence, JSONL audit trail.
+- **Agent roles** — 4 built-in roles (Architect, Implementer, Reviewer, Tester)
+  with system prompt injection and engine/model preferences. Custom roles via
+  `sb_role_register`. 3 new tools: `sb_role_list`, `sb_role_get`, `sb_role_register`.
+  `sb_session_start` now accepts optional `role` parameter.
+- **Message relay** — session-to-session messaging via `sb_session_relay` and
+  broadcast to all active sessions via `sb_session_broadcast`. Relay events
+  tracked on both source and target timelines.
+- **Workflow DAG** — multi-step workflow execution with dependency resolution
+  and parallel execution. DAG cycle detection, failure cascading (failed step
+  marks dependents as `skipped`), context propagation via blackboard. 5 new
+  tools: `sb_workflow_start`, `sb_workflow_status`, `sb_workflow_cancel`,
+  `sb_workflow_list`, `sb_workflow_template`. Pipeline and fan-out/fan-in templates.
+- **Content-based routing** — heuristic task classifier recommends best
+  engine/model. `sb_route_task` tool with `fast`/`cheap`/`capable` preferences.
+- **Provider capabilities extended** — `codeStrength`, `reasoningStrength`,
+  `speedTier`, `privacyLevel` fields on provider capabilities.
+- **12 new source files** in `src/orchestration/`, 7 new test files (341 total tests).
+- **Tool count:** 13 → 28 tools.
+
+### Added — Prior (Error Handling & Robustness)
 - **Error categorization** — `EngineError` class with typed categories
   (`unavailable`, `auth_expired`, `rate_limited`, `timeout`, `context_overflow`,
   `transient`, `cancelled`). Fallback chain and retry logic can now make
@@ -17,9 +40,13 @@ All notable changes to sentinel-bridge are documented here.
 - **CHANGELOG** — this file.
 
 ### Changed
-- All three engines (Claude, Codex, Grok) now throw `EngineError` with
+- All four engines (Claude, Codex, Grok, Ollama) now throw `EngineError` with
   proper categories instead of plain `Error`.
 - `IEngine` interface gains a `cancel()` method.
+- `SessionManager` gains orchestration methods (workflows, context, roles, relay).
+- `SessionStartOptions` and `SessionInfo` gain optional `role` field.
+- `LogCategory` extended with `context` and `orchestration`.
+- `SessionEventType` extended with `system_prompt_injected` and `message_relayed`.
 
 ## [0.1.0] — 2026-04-06
 

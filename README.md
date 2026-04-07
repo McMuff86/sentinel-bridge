@@ -57,48 +57,64 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 ## Architecture
 
 ```
-┌───────────────────────────────────────────────────────┐
-│                     OpenClaw Host                      │
-│                                                        │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │               sentinel-bridge                     │  │
-│  │                                                   │  │
-│  │  Tools (sb_*)  →  SessionManager (mutex-locked)   │  │
-│  │                    ├── Session #1                  │  │
-│  │                    ├── Session #2                  │  │
-│  │                    └── ...                        │  │
-│  │                                                   │  │
-│  │            ┌── IEngine Interface ──┐              │  │
-│  │            │                       │              │  │
-│  │  Claude Engine  Codex Engine  Grok Engine  Ollama │  │
-│  │        │           │         │ (retry)    │(SSE) │  │
-│  │                                                   │  │
-│  │  ┌─────────────────────────────────────────────┐  │  │
-│  │  │  SessionStore   EventStore   StructuredLog  │  │  │
-│  │  │  (atomic JSON)  (JSONL)      (JSON→logger)  │  │  │
-│  │  └─────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────┘  │
-│                                                        │
-└────────────┬───────────┬───────────┬──────────┬───────┘
-             │           │           │          │
-      claude CLI    codex CLI   xAI HTTP   Ollama HTTP
-     (subscription)  (subscription)  (API key)    (local)
+┌──────────────────────────────────────────────────────────────────┐
+│                          OpenClaw Host                            │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │                      sentinel-bridge                         │  │
+│  │                                                              │  │
+│  │  Tools (28 sb_*)  →  SessionManager (mutex-locked)           │  │
+│  │                       ├── Session #1 (role: architect)       │  │
+│  │                       ├── Session #2 (role: implementer)     │  │
+│  │                       └── ...                                │  │
+│  │                                                              │  │
+│  │  ┌── Orchestration Layer ──────────────────────────────────┐ │  │
+│  │  │  WorkflowEngine   RoleRegistry   ContextStore  Relay    │ │  │
+│  │  │  (DAG executor)   (4 built-in)   (blackboard)  (P2P)   │ │  │
+│  │  │  TaskRouter        RoleStore     ContextEvents          │ │  │
+│  │  │  (heuristic)       (persistent)  (JSONL audit)          │ │  │
+│  │  └─────────────────────────────────────────────────────────┘ │  │
+│  │                                                              │  │
+│  │            ┌── IEngine Interface ──────────────┐             │  │
+│  │            │                                   │             │  │
+│  │  Claude Engine  Codex Engine  Grok Engine  Ollama Engine     │  │
+│  │  (subprocess)   (per-message)  (HTTP+retry)  (HTTP+SSE)     │  │
+│  │                                                              │  │
+│  │  ┌──────────────────────────────────────────────────────┐   │  │
+│  │  │  SessionStore   EventStore   StructuredLog  Tracking │   │  │
+│  │  │  (atomic JSON)  (JSONL)      (JSON→logger)  (JSONL)  │   │  │
+│  │  └──────────────────────────────────────────────────────┘   │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                   │
+└───────────┬───────────┬───────────┬──────────┬───────────────────┘
+            │           │           │          │
+     claude CLI    codex CLI   xAI HTTP   Ollama HTTP
+    (subscription) (subscription) (API key)   (local)
 ```
 
 ## Features
 
-- **Multi-engine sessions** — Claude, Codex, Grok, and Ollama through one interface
-- **Routing layer** — model aliases, engine inference, light capability-based primary selection, configurable start fallback chains, and routing trace metadata
+### Multi-Engine Sessions
+- **Four engines** — Claude, Codex, Grok, and Ollama through one interface
+- **Routing layer** — model aliases, engine inference, capability-based primary selection, configurable start fallback chains, and routing trace metadata
 - **Session continuity** — resume where the engine supports it (`resumeSessionId` for Claude); Codex leans on working directory state
-- **Error categorization** — typed `EngineError` with categories (`rate_limited`, `timeout`, `unavailable`, `auth_expired`, etc.) and `retriable` flag for intelligent fallback decisions
-- **Grok retry** — exponential backoff (up to 3 retries) for rate-limited and transient errors, respects `Retry-After`
-- **Ollama streaming** — SSE streaming with `onChunk` callback for incremental output; retry with exponential backoff (up to 2 retries)
-- **Session cancel** — abort in-flight operations without destroying the session
+- **Error categorization** — typed `EngineError` with categories (`rate_limited`, `timeout`, `unavailable`, `auth_expired`, etc.) and `retriable` flag
+- **Retry logic** — Grok (3 retries) and Ollama (2 retries) with exponential backoff, respects `Retry-After`
+- **Streaming** — SSE streaming with `onChunk` callback for Ollama and Grok engines
+
+### Multi-Agent Orchestration
+- **Shared context (blackboard)** — workspace-scoped key-value store for cross-session data sharing
+- **Agent roles** — 4 built-in roles (Architect, Implementer, Reviewer, Tester) with system prompt injection and engine/model preferences; custom roles via `sb_role_register`
+- **Message relay** — send output of one session as input to another; broadcast to all active sessions
+- **Workflow DAG** — define multi-step workflows with dependency resolution; parallel execution where possible; pipeline and fan-out/fan-in templates
+- **Content-based routing** — heuristic task classifier recommends best engine/model based on task description; supports `fast`, `cheap`, `capable` preferences
+
+### Production Quality
 - **Concurrency safety** — per-session mutex serialises send/stop/compact; rehydration deduplication
 - **Persistence** — sessions survive plugin restarts via atomic JSON store writes; JSONL event timeline per session
 - **Structured logging** — JSON log entries with level, category, session context; integrates with OpenClaw's plugin logger
 - **Observability** — per-session status, routing decisions, token usage, cost tracking, and event timeline
-- **Plugin surface** — 13 `sb_*` tools for session lifecycle, engines, routing, cost, compact, events, and cancel
+- **Plugin surface** — 28 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
 - **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
 ## Engines
@@ -185,22 +201,30 @@ That makes it useful even when OpenClaw itself gains stronger native provider su
 
 The codebase is split into focused modules:
 
+- `src/orchestration/*` — multi-agent orchestration layer:
+  - `workflow-engine.ts` / `workflow-types.ts` / `workflow-templates.ts` — DAG execution, step coordination, pipeline/fan-out templates
+  - `roles.ts` / `role-store.ts` — agent role registry (4 built-in + custom), persistent storage
+  - `context-store.ts` / `context-events.ts` — shared blackboard (atomic JSON), JSONL audit trail
+  - `relay.ts` — session-to-session message relay and broadcast types
+  - `task-classifier.ts` / `task-router.ts` / `cost-tiers.ts` — content-based routing heuristics
 - `src/routing/*` — model aliases, model resolution, fallback expansion, routing trace, capability hints
 - `src/engines/*` — engine adapters (Claude CLI, Codex CLI, Grok HTTP, Ollama HTTP/SSE) + engine factory + shared utilities
 - `src/sessions/*` — session store (atomic JSON), event store (JSONL), session mutex, cleanup, info shaping
-- `src/session-manager.ts` — orchestration facade (mutex-protected)
+- `src/session-manager.ts` — central orchestrator (sessions, context, roles, workflows, relay)
 - `src/errors.ts` — `EngineError` with typed categories and retry metadata
 - `src/logging.ts` — `StructuredLogger` with JSON entries, categories, external logger integration
 - `src/tracking.ts` — usage tracking with JSONL logging
 - `src/plugin.ts` — plugin metadata, config types, defaults
 
-## Tools
+## Tools (28)
 
-Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for parameters):
+Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters):
+
+### Session Lifecycle
 
 | Tool | Description |
 |------|-------------|
-| `sb_session_start` | Start a session (with optional start-time fallback chain) |
+| `sb_session_start` | Start a session (with optional role, fallback chain) |
 | `sb_session_send` | Send a message to an active session |
 | `sb_session_stop` | Stop a session |
 | `sb_session_cancel` | Cancel in-flight operation without stopping the session |
@@ -208,19 +232,45 @@ Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for paramet
 | `sb_session_status` | Session details |
 | `sb_session_overview` | Aggregate overview + engine descriptors |
 | `sb_session_events` | Session event timeline (last N events) |
+| `sb_compact` | Compact session context (engine-specific) |
+
+### Engines & Routing
+
+| Tool | Description |
+|------|-------------|
 | `sb_engine_list` / `sb_engine_status` | Engine health / PATH / API key |
 | `sb_model_route` | Resolve model → engine |
 | `sb_cost_report` | Cost aggregation |
-| `sb_compact` | Compact session context (engine-specific) |
+| `sb_route_task` | Content-based routing: analyze task → recommend engine/model |
+
+### Orchestration
+
+| Tool | Description |
+|------|-------------|
+| `sb_context_set` | Set a key-value pair in shared workspace context |
+| `sb_context_get` | Get a value from shared context |
+| `sb_context_list` | List all entries in a workspace context |
+| `sb_context_clear` | Clear all entries in a workspace |
+| `sb_role_list` | List available agent roles (built-in + custom) |
+| `sb_role_get` | Get role details |
+| `sb_role_register` | Register a custom agent role |
+| `sb_session_relay` | Relay a message from one session to another |
+| `sb_session_broadcast` | Broadcast a message to all active sessions |
+| `sb_workflow_start` | Start a multi-step workflow (DAG) |
+| `sb_workflow_status` | Get workflow progress |
+| `sb_workflow_cancel` | Cancel a running workflow |
+| `sb_workflow_list` | List all workflows |
+| `sb_workflow_template` | Generate a workflow definition from a template |
 
 ## Documentation
 
 - [Getting Started](docs/getting-started.md)
 - [Configuration Reference](docs/configuration.md)
 - [API Reference](docs/API-REFERENCE.md)
-- [Live verification checklist](docs/LIVE-VERIFICATION.md)
 - [Technical Architecture](docs/TECHNICAL-ARCHITECTURE.md)
+- [Live verification checklist](docs/LIVE-VERIFICATION.md)
 - [Context handoff (agents)](docs/CONTEXT-HANDOFF.md)
+- [Roadmap](ROADMAP.md)
 
 ## Contributing
 

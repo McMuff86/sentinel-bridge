@@ -16,7 +16,7 @@ sentinel-bridge is an OpenClaw plugin that provides Claude Code CLI, Codex CLI, 
 - **Enums:** Use string literal unions, not TypeScript enums.
 - **Nullability:** Use `null` for intentional absence, `undefined` for optional/unset.
 - **Error handling:** Throw `EngineError` (from `src/errors.ts`) with a typed `ErrorCategory` (`unavailable`, `auth_expired`, `rate_limited`, `timeout`, `context_overflow`, `transient`, `cancelled`, `unknown`). Set `retriable` appropriately. SessionManager and fallback chain use these categories for intelligent decisions.
-- **Logging:** Use `StructuredLogger` (from `src/logging.ts`) via `this.log.info/warn/error(category, message, context)`. Categories: `session`, `engine`, `routing`, `fallback`, `rehydration`, `expiry`, `store`, `config`, `cleanup`. The logger integrates with OpenClaw's `api.logger` when available. No `console.log` in production code.
+- **Logging:** Use `StructuredLogger` (from `src/logging.ts`) via `this.log.info/warn/error(category, message, context)`. Categories: `session`, `engine`, `routing`, `fallback`, `rehydration`, `expiry`, `store`, `config`, `cleanup`, `context`, `orchestration`. The logger integrates with OpenClaw's `api.logger` when available. No `console.log` in production code.
 
 ## File Structure
 
@@ -60,6 +60,19 @@ sentinel-bridge/
 │   │   ├── routing-trace.ts      # Routing trace capture for observability
 │   │   ├── select-engine.ts      # Capability-based primary engine selection
 │   │   └── provider-capabilities.ts # Light capability registry
+│   ├── orchestration/
+│   │   ├── context-store.ts      # Shared blackboard (atomic JSON per workspace)
+│   │   ├── context-events.ts     # JSONL audit trail for context mutations
+│   │   ├── roles.ts              # AgentRole interface, BUILT_IN_ROLES, RoleRegistry
+│   │   ├── role-store.ts         # Persistent custom roles (atomic JSON)
+│   │   ├── relay.ts              # RelayResult / BroadcastResult types
+│   │   ├── workflow-types.ts     # WorkflowDefinition, WorkflowState, step types
+│   │   ├── workflow-engine.ts    # DAG executor: validation, topological execution
+│   │   ├── workflow-store.ts     # Persistent workflow state (atomic JSON)
+│   │   ├── workflow-templates.ts # Pipeline + fan-out/fan-in factories
+│   │   ├── task-classifier.ts    # Keyword/pattern task classification
+│   │   ├── task-router.ts        # Content-based engine recommendation
+│   │   └── cost-tiers.ts         # Engine cost ranking
 │   ├── sessions/
 │   │   ├── session-store.ts      # JSON persistence (atomic writes)
 │   │   ├── session-events.ts     # JSONL event timeline per session
@@ -83,15 +96,23 @@ sentinel-bridge/
 │       ├── tracking.test.ts
 │       ├── index.test.ts
 │       ├── plugin.test.ts
-│       └── types.test.ts
+│       ├── types.test.ts
+│       ├── context-store.test.ts
+│       ├── roles.test.ts
+│       ├── relay.test.ts
+│       ├── workflow-engine.test.ts
+│       ├── workflow-templates.test.ts
+│       ├── task-classifier.test.ts
+│       ├── task-router.test.ts
+│       └── routing.test.ts
 └── dist/                         # Compiled output (gitignored)
 ```
 
 ## Testing Strategy
 
 - **Framework:** vitest (run via `npx vitest run`)
-- **Unit tests:** 122+ tests across 14 test files in `src/__tests__/`
-- **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama
+- **Unit tests:** 341 tests across 25 test files in `src/__tests__/`
+- **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama, mock stores for orchestration
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually
 - **CI:** GitHub Actions runs tests on push/PR to main (Node 22)
