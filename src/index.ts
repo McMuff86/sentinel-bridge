@@ -560,6 +560,19 @@ function buildTools(): ToolDef[] {
     /* ── Circuit breaker tools ─────────────────────────────────── */
 
     {
+      name: 'sb_queue_status',
+      description:
+        'Show the session queue status. When maxConcurrentSessions is reached, ' +
+        'new session starts wait in a priority queue instead of being rejected.',
+      parameters: { type: 'object', properties: {} },
+      handler: async (_params, ctx) => {
+        return {
+          ok: true,
+          queue: ctx.manager.getQueueSnapshot(),
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
       name: 'sb_health_check',
       description:
         'Run health checks on engines (or a specific engine). Returns availability, ' +
@@ -1426,6 +1439,7 @@ function toSessionManagerConfig(
     defaultModel: config.defaultModel,
     defaultFallbackChain: config.defaultFallbackChain,
     circuitBreaker: config.circuitBreaker,
+    queue: config.queue,
     healthCheck: config.healthCheck,
     claude: normalizeEngineConfig(config.engines?.claude),
     codex: normalizeEngineConfig(config.engines?.codex),

@@ -19,6 +19,8 @@ import { CircuitBreaker } from './orchestration/circuit-breaker.js';
 import type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
 import { HealthChecker } from './orchestration/health-check.js';
 import type { HealthCheckResult } from './orchestration/health-check.js';
+import { SessionQueue } from './orchestration/session-queue.js';
+import type { QueuePriority, QueueSnapshot } from './orchestration/session-queue.js';
 import { expandFallbackChain } from './routing/expand-fallback-chain.js';
 import {
   appendRoutingAttempt,
@@ -90,6 +92,7 @@ export class SessionManager {
   readonly workflows: WorkflowEngine;
   readonly circuitBreaker: CircuitBreaker;
   readonly healthChecker: HealthChecker;
+  readonly sessionQueue: SessionQueue;
   readonly log: StructuredLogger;
   private cleanupTimer: {
     unref?: () => void;
@@ -100,6 +103,7 @@ export class SessionManager {
     this.roles = new RoleRegistry(this.roleStore.list());
     this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
     this.healthChecker = new HealthChecker(config.healthCheck, this.circuitBreaker);
+    this.sessionQueue = new SessionQueue(config.queue);
     this.workflows = new WorkflowEngine();
     this.log = new StructuredLogger(externalLogger);
 
@@ -683,6 +687,11 @@ export class SessionManager {
       this.store.delete(name);
       this.emit('session_stopped', name, record.session.engine);
       this.log.info('session', `Session "${name}" stopped`, { session: name, engine: record.session.engine });
+
+      // Release a waiting session from the queue if any
+      if (this.sessionQueue.hasWaiters) {
+        this.sessionQueue.release();
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.log.error('session', `Failed to stop session "${name}": ${errMsg}`, { session: name, engine: record.session.engine });
@@ -718,6 +727,7 @@ export class SessionManager {
 
   async dispose(): Promise<void> {
     this.healthChecker.stop();
+    this.sessionQueue.rejectAll('SessionManager is shutting down.');
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer as unknown as number);
       this.cleanupTimer = null;
@@ -754,18 +764,46 @@ export class SessionManager {
     }
   }
 
-  private enforceConcurrentSessionLimit(): void {
+  private isAtSessionLimit(): boolean {
     const maxConcurrentSessions =
       this.config.maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
     const activeSessions = Array.from(this.sessions.values()).filter(
       (record) => record.session.status === 'active',
     );
+    return activeSessions.length >= maxConcurrentSessions;
+  }
 
-    if (activeSessions.length >= maxConcurrentSessions) {
+  private enforceConcurrentSessionLimit(): void {
+    if (this.isAtSessionLimit()) {
+      const maxConcurrentSessions =
+        this.config.maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
       throw new Error(
         `Maximum concurrent session limit reached (${maxConcurrentSessions}).`,
       );
     }
+  }
+
+  /**
+   * Wait in the backpressure queue until a session slot is available.
+   * If already under the limit, returns immediately.
+   */
+  async waitForSlot(sessionName: string, priority: QueuePriority = 'normal'): Promise<void> {
+    if (!this.isAtSessionLimit()) return;
+
+    this.log.info('orchestration', `Session "${sessionName}" waiting in queue (priority: ${priority})`, {
+      session: sessionName,
+      meta: { queueDepth: this.sessionQueue.depth, priority },
+    });
+
+    await this.sessionQueue.enqueue(sessionName, priority);
+
+    this.log.info('orchestration', `Session "${sessionName}" released from queue`, {
+      session: sessionName,
+    });
+  }
+
+  getQueueSnapshot(): QueueSnapshot {
+    return this.sessionQueue.getSnapshot();
   }
 
   private resolveEngineConfig(

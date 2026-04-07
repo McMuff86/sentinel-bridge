@@ -118,6 +118,7 @@
       "sb_workflow_list",
       "sb_workflow_template",
       "sb_route_task",
+      "sb_queue_status",
       "sb_health_check",
       "sb_circuit_status",
       "sb_circuit_reset"

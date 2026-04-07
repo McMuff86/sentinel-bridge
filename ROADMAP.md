@@ -1,6 +1,6 @@
 # Roadmap — sentinel-bridge
 
-Current state: 32 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, circuit breaker, and health checks. 371 tests, zero runtime dependencies. Integrated into Mission-Control via REST API layer.
+Current state: 33 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, circuit breaker, health checks, and backpressure queue. 381 tests, zero runtime dependencies. Integrated into Mission-Control via REST API layer.
 
 ---
 
@@ -31,11 +31,12 @@ Current state: 32 tools, 4 engines, multi-agent orchestration with workflows (wi
 
 ## Medium-term (production hardening)
 
-### Backpressure & Queuing
-- Replace hard `maxConcurrentSessions` reject with a priority queue
-- Workflow steps that exceed session limit wait in queue instead of failing
-- Priority levels for sessions (workflow steps vs. ad-hoc sessions)
-- Configurable queue depth and timeout
+### ~~Backpressure & Queuing~~ (done)
+- ~~Replace hard `maxConcurrentSessions` reject with a priority queue~~
+- ~~Workflow steps that exceed session limit wait in queue instead of failing~~
+- ~~Priority levels: high, normal, low~~
+- ~~Configurable queue depth (default 20) and timeout (default 2 min)~~
+- ~~`sb_queue_status` tool for observability~~
 
 ### Agent Subscriptions (Pub/Sub)
 - Sessions subscribe to named topics

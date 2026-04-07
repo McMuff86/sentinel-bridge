@@ -63,7 +63,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │                      sentinel-bridge                         │  │
 │  │                                                              │  │
-│  │  Tools (32 sb_*)  →  SessionManager (mutex-locked)           │  │
+│  │  Tools (33 sb_*)  →  SessionManager (mutex-locked)           │  │
 │  │                       ├── Session #1 (role: architect)       │  │
 │  │                       ├── Session #2 (role: implementer)     │  │
 │  │                       └── ...                                │  │
@@ -115,7 +115,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 - **Structured logging** — JSON log entries with level, category, session context; integrates with OpenClaw's plugin logger
 - **Observability** — per-session status, routing decisions, token usage, cost tracking, and event timeline
 - **Circuit breaker** — per-engine failure tracking with automatic disabling (closed → open → half-open states), configurable threshold and cooldown, manual reset
-- **Plugin surface** — 32 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
+- **Plugin surface** — 33 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
 - **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
 ## Engines
@@ -217,7 +217,7 @@ The codebase is split into focused modules:
 - `src/tracking.ts` — usage tracking with JSONL logging
 - `src/plugin.ts` — plugin metadata, config types, defaults
 
-## Tools (32)
+## Tools (33)
 
 Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters):
 
@@ -246,6 +246,7 @@ Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full pa
 | `sb_circuit_status` | Show circuit breaker state for all engines |
 | `sb_circuit_reset` | Manually reset a circuit breaker to re-enable an engine |
 | `sb_health_check` | Run health probes on engines (latency, availability) |
+| `sb_queue_status` | Show session queue depth and priority breakdown |
 
 ### Orchestration
 

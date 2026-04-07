@@ -74,7 +74,8 @@ sentinel-bridge/
 │   │   ├── task-router.ts        # Content-based engine recommendation
 │   │   ├── cost-tiers.ts         # Engine cost ranking
 │   │   ├── circuit-breaker.ts    # Per-engine circuit breaker (closed/open/half-open)
-│   │   └── health-check.ts      # Periodic engine health probes (CLI/HTTP)
+│   │   ├── health-check.ts      # Periodic engine health probes (CLI/HTTP)
+│   │   └── session-queue.ts    # Priority queue for backpressure
 │   ├── sessions/
 │   │   ├── session-store.ts      # JSON persistence (atomic writes)
 │   │   ├── session-events.ts     # JSONL event timeline per session
@@ -108,6 +109,7 @@ sentinel-bridge/
 │       ├── task-router.test.ts
 │       ├── circuit-breaker.test.ts
 │       ├── health-check.test.ts
+│       ├── session-queue.test.ts
 │       └── routing.test.ts
 └── dist/                         # Compiled output (gitignored)
 ```
@@ -115,7 +117,7 @@ sentinel-bridge/
 ## Testing Strategy
 
 - **Framework:** vitest (run via `npx vitest run`)
-- **Unit tests:** 371 tests across 27 test files in `src/__tests__/`
+- **Unit tests:** 381 tests across 28 test files in `src/__tests__/`
 - **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama, mock stores for orchestration
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually

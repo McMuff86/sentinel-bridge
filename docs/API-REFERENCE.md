@@ -448,6 +448,22 @@ Manually reset a circuit breaker to closed state, re-enabling the engine.
 
 ---
 
+## Queue Tools
+
+### `sb_queue_status`
+
+Show the session backpressure queue. When `maxConcurrentSessions` is reached, new session starts wait in a priority queue instead of being rejected.
+
+**Returns:** `{ ok, queue: { depth, maxDepth, highPriority, normalPriority, lowPriority } }`.
+
+**Configuration (plugin config):**
+- `queue.maxDepth` — Max items waiting (default: 20, 0 = unlimited)
+- `queue.timeoutMs` — Max wait time per entry (default: 120000ms / 2 min)
+
+**How it works:** When a session start would exceed `maxConcurrentSessions`, the request waits in the queue. When a session stops, the next queued request (highest priority first) is released. If the timeout expires, the request is rejected with a timeout error.
+
+---
+
 ## Health Check Tools
 
 ### `sb_health_check`

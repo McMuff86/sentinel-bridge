@@ -4,6 +4,16 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Added — Backpressure & Session Queue
+- **Priority session queue** — when `maxConcurrentSessions` is reached, new
+  session starts wait in a queue instead of being rejected. Three priority
+  levels: `high`, `normal`, `low`. Configurable `maxDepth` (default: 20)
+  and `timeoutMs` (default: 2 min).
+- **`sb_queue_status`** tool — shows queue depth and priority breakdown.
+- **Auto-release** — when a session stops, the next queued session is released.
+- **Graceful shutdown** — all queued entries rejected on `dispose()`.
+- **Tool count:** 32 → 33 tools.
+
 ### Added — Health Checks
 - **Periodic engine health probes** — `HealthChecker` module probes all 4 engines:
   CLI engines via PATH lookup, Grok via `/models` API ping, Ollama via root HTTP ping.
