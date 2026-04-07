@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { getStateDir } from '../state-dir.js';
+
 export interface ContextEntry {
   key: string;
   value: unknown;
@@ -17,8 +19,7 @@ export interface ContextStoreData {
 const CONTEXT_KEY_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9 _.:-]{0,127}$/;
 
 function getDefaultContextDir(): string {
-  const home = process?.env?.HOME ?? '/tmp';
-  return join(home, '.openclaw', 'extensions', 'sentinel-bridge', 'state', 'context');
+  return join(getStateDir(), 'context');
 }
 
 function sanitiseFileName(name: string): string {

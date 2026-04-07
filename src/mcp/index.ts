@@ -29,7 +29,7 @@ const manager = new SessionManager({
 
 const server = new McpServer({
   name: 'sentinel-bridge',
-  version: '0.1.0',
+  version: '0.2.0',
 });
 
 for (const { definition, handler } of buildMcpTools(manager)) {

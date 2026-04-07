@@ -268,6 +268,65 @@ describe('UsageTracker', () => {
       },
     });
   });
+
+  it('should log and summarize ollama engine entries', async () => {
+    const { tracker } = await createTracker(
+      () => new Date('2026-04-04T15:30:00.000Z'),
+    );
+
+    await tracker.logCall({
+      timestamp: '2026-04-04T14:00:00.000Z',
+      sessionName: 'local-session',
+      engine: 'ollama',
+      model: 'gemma4',
+      action: 'start',
+      subscriptionCovered: false,
+      durationMs: 150,
+    });
+    await tracker.logCall({
+      timestamp: '2026-04-04T14:05:00.000Z',
+      sessionName: 'local-session',
+      engine: 'ollama',
+      model: 'gemma4',
+      action: 'send',
+      tokens: {
+        input: 200,
+        output: 80,
+        cachedInput: 0,
+        total: 280,
+      },
+      costUsd: 0,
+      subscriptionCovered: false,
+      durationMs: 3000,
+    });
+
+    await expect(tracker.getEngineSummary('ollama')).resolves.toEqual({
+      engine: 'ollama',
+      entryCount: 2,
+      sessionCount: 1,
+      totalCostUsd: 0,
+      totalDurationMs: 3150,
+      totalTokens: {
+        input: 200,
+        output: 80,
+        cachedInput: 0,
+        total: 280,
+      },
+      coveredCostUsd: 0,
+      uncoveredCostUsd: 0,
+      coveredEntryCount: 0,
+      uncoveredEntryCount: 2,
+      errorCount: 0,
+      actionCounts: {
+        start: 1,
+        send: 1,
+        compact: 0,
+        stop: 0,
+      },
+      firstTimestamp: '2026-04-04T14:00:00.000Z',
+      lastTimestamp: '2026-04-04T14:05:00.000Z',
+    });
+  });
 });
 
 async function createTracker(now?: () => Date): Promise<{

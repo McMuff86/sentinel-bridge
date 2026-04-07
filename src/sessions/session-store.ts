@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
+import { getStateDir } from '../state-dir.js';
 import type { EngineKind, SessionInfo } from '../types.js';
 
 type PersistedSessionRecord = {
@@ -41,8 +42,7 @@ type SessionStoreData = {
 };
 
 function getDefaultStorePath(): string {
-  const home = process?.env?.HOME ?? '/tmp';
-  return join(home, '.openclaw', 'extensions', 'sentinel-bridge', 'state', 'sessions.json');
+  return `${getStateDir()}/sessions.json`;
 }
 
 export class SessionStore {

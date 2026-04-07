@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
+import { getStateDir } from '../state-dir.js';
 import type { AgentRole } from './roles.js';
 
 interface RoleStoreData {
@@ -9,8 +10,7 @@ interface RoleStoreData {
 }
 
 function getDefaultRoleStorePath(): string {
-  const home = process?.env?.HOME ?? '/tmp';
-  return join(home, '.openclaw', 'extensions', 'sentinel-bridge', 'state', 'roles.json');
+  return `${getStateDir()}/roles.json`;
 }
 
 export class RoleStore {

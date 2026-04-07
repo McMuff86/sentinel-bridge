@@ -1,6 +1,8 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { getStateDir } from '../state-dir.js';
+
 export type ContextEventType = 'context_set' | 'context_deleted' | 'context_cleared';
 
 export interface ContextEvent {
@@ -12,8 +14,7 @@ export interface ContextEvent {
 }
 
 function getDefaultContextEventsDir(): string {
-  const home = process?.env?.HOME ?? '/tmp';
-  return join(home, '.openclaw', 'extensions', 'sentinel-bridge', 'state', 'context-events');
+  return join(getStateDir(), 'context-events');
 }
 
 function sanitiseFileName(name: string): string {

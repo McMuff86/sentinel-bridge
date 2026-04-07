@@ -596,11 +596,11 @@ function requireBoolean(value: unknown, context: string): boolean {
 }
 
 function requireEngineKind(value: unknown, context: string): EngineKind {
-  if (value === 'claude' || value === 'codex' || value === 'grok') {
+  if (value === 'claude' || value === 'codex' || value === 'grok' || value === 'ollama') {
     return value;
   }
 
-  throw new Error(`${context} must be "claude", "codex", or "grok".`);
+  throw new Error(`${context} must be "claude", "codex", "grok", or "ollama".`);
 }
 
 function requireAction(value: unknown, context: string): UsageAction {

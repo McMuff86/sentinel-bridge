@@ -1,10 +1,28 @@
 {
   "name": "sentinel-bridge",
-  "version": "0.1.0",
-  "description": "OpenClaw plugin: Claude Code CLI, Codex CLI, Grok API via unified sb_* tools",
+  "version": "0.2.0",
+  "description": "Multi-engine LLM orchestration: route prompts across Claude, Codex, Grok, and Ollama with DAG workflows, adaptive routing, and 33+ MCP tools",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adrianmuff/sentinel-bridge.git"
+  },
+  "keywords": [
+    "mcp",
+    "llm",
+    "multi-engine",
+    "orchestration",
+    "claude",
+    "codex",
+    "grok",
+    "ollama",
+    "workflow",
+    "routing",
+    "agent"
+  ],
   "bin": {
     "sentinel-bridge-mcp": "./dist/mcp/index.js"
   },
@@ -12,6 +30,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
     }
   },
   "files": [

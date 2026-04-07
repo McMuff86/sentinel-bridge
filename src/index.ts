@@ -55,6 +55,12 @@ export type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
 export type { HealthCheckResult } from './orchestration/health-check.js';
 export type { TaskRoutingResult } from './orchestration/task-router.js';
 export { routeTask } from './orchestration/task-router.js';
+export type { TaskCategory, TaskClassification } from './orchestration/task-classifier.js';
+export { classifyTask } from './orchestration/task-classifier.js';
+export type { ContextEntry, ContextStoreData } from './orchestration/context-store.js';
+export { ContextStore } from './orchestration/context-store.js';
+export type { QueuePriority, QueueSnapshot } from './orchestration/session-queue.js';
+export { getStateDir } from './state-dir.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok' | 'ollama';
 

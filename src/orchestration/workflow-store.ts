@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
+import { getStateDir } from '../state-dir.js';
 import type { WorkflowState } from './workflow-types.js';
 
 interface WorkflowStoreData {
@@ -9,8 +10,7 @@ interface WorkflowStoreData {
 }
 
 function getDefaultWorkflowStorePath(): string {
-  const home = process?.env?.HOME ?? '/tmp';
-  return join(home, '.openclaw', 'extensions', 'sentinel-bridge', 'state', 'workflows.json');
+  return `${getStateDir()}/workflows.json`;
 }
 
 export class WorkflowStore {

@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { getStateDir } from '../state-dir.js';
 import type { EngineKind } from '../types.js';
 
 export type SessionEventType =
@@ -28,8 +29,7 @@ export interface SessionEvent {
 }
 
 function getDefaultEventsDir(): string {
-  const home = process?.env?.HOME ?? '/tmp';
-  return join(home, '.openclaw', 'extensions', 'sentinel-bridge', 'state', 'events');
+  return join(getStateDir(), 'events');
 }
 
 function sanitiseFileName(name: string): string {

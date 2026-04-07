@@ -4,7 +4,7 @@
 
 export const PLUGIN_META = {
   name: 'sentinel-bridge',
-  version: '0.1.0',
+  version: '0.2.0',
   description:
     'Multi-engine routing and session bridge for Claude Code, Codex, Grok & Ollama. ' +
     'Unify provider adapters, routing, and session continuity for OpenClaw.',
