@@ -355,6 +355,24 @@ Start a multi-step workflow defined as a DAG. Steps execute in dependency order 
 
 ---
 
+### `sb_workflow_resume`
+
+Resume an interrupted or running workflow. Steps that were mid-flight are reset to pending and re-executed. Completed steps are preserved.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `id` | yes | Workflow id to resume |
+
+**Returns:** `{ ok, workflow: WorkflowState }`.
+
+**Notes:**
+- Only workflows with status `running` or `interrupted` can be resumed.
+- Steps with status `running` (were mid-flight when interrupted) are reset to `pending`.
+- Steps with status `completed` retain their output — they are not re-executed.
+- Use `sb_workflow_list` or `sb_workflow_status` to find interrupted workflows.
+
+---
+
 ### `sb_workflow_cancel`
 
 | Parameter | Required | Description |

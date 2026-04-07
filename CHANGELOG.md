@@ -4,6 +4,17 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Added — Workflow Recovery
+- **Workflow checkpointing** — workflow state is persisted to disk after each
+  step completion/failure via `WorkflowStore`. Interrupted workflows (plugin
+  restart) are detectable via `listInterrupted()`.
+- **`sb_workflow_resume`** — resume interrupted or running workflows. Steps that
+  were mid-flight are reset to pending and re-executed; completed steps are
+  preserved.
+- **`interrupted` status** — new `WorkflowStatus` value for workflows that were
+  running when the plugin stopped.
+- **Tool count:** 30 → 31 tools.
+
 ### Added — Circuit Breaker
 - **Per-engine circuit breaker** — tracks consecutive failures per engine with
   three states: closed (normal), open (blocking), half-open (probing).

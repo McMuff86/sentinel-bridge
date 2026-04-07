@@ -113,7 +113,7 @@ sentinel-bridge/
 ## Testing Strategy
 
 - **Framework:** vitest (run via `npx vitest run`)
-- **Unit tests:** 354 tests across 26 test files in `src/__tests__/`
+- **Unit tests:** 359 tests across 26 test files in `src/__tests__/`
 - **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama, mock stores for orchestration
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually

@@ -85,7 +85,7 @@ export class SessionManager {
   readonly contextEvents = new ContextEventStore();
   readonly roles: RoleRegistry;
   private readonly roleStore = new RoleStore();
-  readonly workflows = new WorkflowEngine();
+  readonly workflows: WorkflowEngine;
   readonly circuitBreaker: CircuitBreaker;
   readonly log: StructuredLogger;
   private cleanupTimer: {
@@ -96,6 +96,7 @@ export class SessionManager {
     this.config = config;
     this.roles = new RoleRegistry(this.roleStore.list());
     this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
+    this.workflows = new WorkflowEngine();
     this.log = new StructuredLogger(externalLogger);
 
     const cleanupIntervalMs =
@@ -973,6 +974,17 @@ export class SessionManager {
 
   getWorkflowStatus(id: string): WorkflowState | undefined {
     return this.workflows.getStatus(id);
+  }
+
+  async resumeWorkflow(id: string): Promise<WorkflowState> {
+    this.log.info('orchestration', `Resuming workflow "${id}"`, {
+      meta: { workflowId: id },
+    });
+    return this.workflows.resume(id, this);
+  }
+
+  listInterruptedWorkflows(): WorkflowState[] {
+    return this.workflows.listInterrupted();
   }
 
   cancelWorkflow(id: string): WorkflowState {

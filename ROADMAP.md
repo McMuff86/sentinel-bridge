@@ -1,15 +1,15 @@
 # Roadmap — sentinel-bridge
 
-Current state: 30 tools, 4 engines, multi-agent orchestration with workflows, roles, shared context, relay, content-based routing, and circuit breaker. 354 tests, zero runtime dependencies.
+Current state: 31 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, and circuit breaker. 359 tests, zero runtime dependencies.
 
 ---
 
 ## Short-term (next iteration)
 
-### Workflow Recovery & Persistence
-- Persist running workflow state so interrupted workflows can resume after plugin restart
-- Checkpoint step outputs to disk between steps
-- `sb_workflow_resume` tool to pick up where a workflow left off
+### ~~Workflow Recovery & Persistence~~ (done)
+- ~~Persist running workflow state so interrupted workflows can resume after plugin restart~~
+- ~~Checkpoint step outputs to disk between steps~~
+- ~~`sb_workflow_resume` tool to pick up where a workflow left off~~
 
 ### ~~Circuit Breaker~~ (done)
 - ~~Track consecutive failures per engine~~

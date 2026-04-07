@@ -31,7 +31,7 @@ export interface WorkflowStepState {
   turnUsage?: TurnUsage;
 }
 
-export type WorkflowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type WorkflowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 
 export interface WorkflowState {
   id: string;

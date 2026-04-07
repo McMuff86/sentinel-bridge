@@ -14,7 +14,7 @@ describe('activate', () => {
 
     activate(mockApi);
 
-    expect(registered).toHaveLength(30);
+    expect(registered).toHaveLength(31);
     expect(registered).toContain('sb_session_start');
     expect(registered).toContain('sb_session_send');
     expect(registered).toContain('sb_session_stop');
@@ -39,6 +39,7 @@ describe('activate', () => {
     expect(registered).toContain('sb_session_broadcast');
     expect(registered).toContain('sb_workflow_start');
     expect(registered).toContain('sb_workflow_status');
+    expect(registered).toContain('sb_workflow_resume');
     expect(registered).toContain('sb_workflow_cancel');
     expect(registered).toContain('sb_workflow_list');
     expect(registered).toContain('sb_workflow_template');

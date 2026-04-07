@@ -63,7 +63,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │                      sentinel-bridge                         │  │
 │  │                                                              │  │
-│  │  Tools (30 sb_*)  →  SessionManager (mutex-locked)           │  │
+│  │  Tools (31 sb_*)  →  SessionManager (mutex-locked)           │  │
 │  │                       ├── Session #1 (role: architect)       │  │
 │  │                       ├── Session #2 (role: implementer)     │  │
 │  │                       └── ...                                │  │
@@ -115,7 +115,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 - **Structured logging** — JSON log entries with level, category, session context; integrates with OpenClaw's plugin logger
 - **Observability** — per-session status, routing decisions, token usage, cost tracking, and event timeline
 - **Circuit breaker** — per-engine failure tracking with automatic disabling (closed → open → half-open states), configurable threshold and cooldown, manual reset
-- **Plugin surface** — 30 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
+- **Plugin surface** — 31 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
 - **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
 ## Engines
@@ -217,7 +217,7 @@ The codebase is split into focused modules:
 - `src/tracking.ts` — usage tracking with JSONL logging
 - `src/plugin.ts` — plugin metadata, config types, defaults
 
-## Tools (30)
+## Tools (31)
 
 Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters):
 
@@ -261,6 +261,7 @@ Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full pa
 | `sb_session_broadcast` | Broadcast a message to all active sessions |
 | `sb_workflow_start` | Start a multi-step workflow (DAG) |
 | `sb_workflow_status` | Get workflow progress |
+| `sb_workflow_resume` | Resume an interrupted workflow |
 | `sb_workflow_cancel` | Cancel a running workflow |
 | `sb_workflow_list` | List all workflows |
 | `sb_workflow_template` | Generate a workflow definition from a template |

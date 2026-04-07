@@ -1,4 +1,5 @@
 import type { SessionManager } from '../session-manager.js';
+import { WorkflowStore } from './workflow-store.js';
 import type {
   WorkflowDefinition,
   WorkflowState,
@@ -157,6 +158,11 @@ function markDependentsSkipped(
 
 export class WorkflowEngine {
   private readonly workflows = new Map<string, WorkflowState>();
+  private readonly store: WorkflowStore;
+
+  constructor(store?: WorkflowStore) {
+    this.store = store ?? new WorkflowStore();
+  }
 
   async start(
     definition: WorkflowDefinition,
@@ -172,21 +178,88 @@ export class WorkflowEngine {
     state.status = 'running';
     state.updatedAt = new Date().toISOString();
     this.workflows.set(definition.id, state);
+    this.checkpoint(state);
 
     // Execute the DAG asynchronously — don't await here so the caller gets the initial state
     this.executeDAG(definition, state, manager).catch(error => {
       state.status = 'failed';
       state.error = error instanceof Error ? error.message : String(error);
       state.updatedAt = new Date().toISOString();
+      this.checkpoint(state);
     });
 
     return { ...state, steps: { ...state.steps } };
   }
 
+  /**
+   * Resume an interrupted workflow. Resets 'running' steps to 'pending'
+   * (they were mid-flight when the plugin stopped) and continues execution.
+   */
+  async resume(
+    id: string,
+    manager: SessionManager,
+  ): Promise<WorkflowState> {
+    // Check in-memory first
+    let state = this.workflows.get(id);
+
+    // Try loading from store
+    if (!state) {
+      const persisted = this.store.get(id);
+      if (!persisted) {
+        throw new Error(`Workflow "${id}" not found.`);
+      }
+      state = persisted;
+      this.workflows.set(id, state);
+    }
+
+    if (state.status !== 'running' && state.status !== 'interrupted') {
+      throw new Error(
+        `Workflow "${id}" cannot be resumed (status: ${state.status}). Only running or interrupted workflows can be resumed.`,
+      );
+    }
+
+    // Reset steps that were 'running' at the time of interruption back to 'pending'
+    for (const stepState of Object.values(state.steps)) {
+      if (stepState.status === 'running') {
+        stepState.status = 'pending';
+        stepState.startedAt = undefined;
+      }
+    }
+
+    state.status = 'running';
+    state.updatedAt = new Date().toISOString();
+    this.checkpoint(state);
+
+    // Continue DAG execution
+    this.executeDAG(state.definition, state, manager).catch(error => {
+      state!.status = 'failed';
+      state!.error = error instanceof Error ? error.message : String(error);
+      state!.updatedAt = new Date().toISOString();
+      this.checkpoint(state!);
+    });
+
+    return { ...state, steps: { ...state.steps } };
+  }
+
+  /**
+   * Find workflows that were interrupted (status 'running' in store but not
+   * actively executing). Call this on plugin startup.
+   */
+  listInterrupted(): WorkflowState[] {
+    const persisted = this.store.list();
+    return persisted.filter(
+      w => w.status === 'running' || w.status === 'interrupted',
+    );
+  }
+
   getStatus(id: string): WorkflowState | undefined {
     const state = this.workflows.get(id);
-    if (!state) return undefined;
-    return { ...state, steps: { ...state.steps } };
+    if (state) return { ...state, steps: { ...state.steps } };
+
+    // Fall back to store for completed/failed workflows
+    const persisted = this.store.get(id);
+    if (!persisted) return undefined;
+    return { ...persisted };
   }
 
   cancel(id: string): WorkflowState {
@@ -203,14 +276,29 @@ export class WorkflowEngine {
       }
     }
 
+    this.checkpoint(state);
     return { ...state, steps: { ...state.steps } };
   }
 
   list(): WorkflowState[] {
-    return Array.from(this.workflows.values()).map(s => ({
+    // Merge in-memory with persisted (in-memory takes precedence)
+    const inMemoryIds = new Set(this.workflows.keys());
+    const persisted = this.store.list().filter(w => !inMemoryIds.has(w.id));
+
+    const inMemory = Array.from(this.workflows.values()).map(s => ({
       ...s,
       steps: { ...s.steps },
     }));
+
+    return [...inMemory, ...persisted];
+  }
+
+  private checkpoint(state: WorkflowState): void {
+    try {
+      this.store.upsert(state);
+    } catch {
+      // Best-effort persistence — don't fail the workflow
+    }
   }
 
   private async executeDAG(
@@ -231,6 +319,7 @@ export class WorkflowEngine {
           );
           state.status = anyFailed ? 'failed' : 'completed';
           state.updatedAt = new Date().toISOString();
+          this.checkpoint(state);
           return;
         }
         // Steps are still running — wait a tick
@@ -301,6 +390,7 @@ export class WorkflowEngine {
       stepState.turnUsage = result.turnUsage;
       stepState.completedAt = new Date().toISOString();
       state.updatedAt = new Date().toISOString();
+      this.checkpoint(state);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       stepState.status = 'failed';
@@ -310,6 +400,7 @@ export class WorkflowEngine {
 
       // Skip dependent steps
       markDependentsSkipped(step.id, definition, state);
+      this.checkpoint(state);
     }
   }
 }

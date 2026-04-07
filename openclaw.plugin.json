@@ -113,6 +113,7 @@
       "sb_session_broadcast",
       "sb_workflow_start",
       "sb_workflow_status",
+      "sb_workflow_resume",
       "sb_workflow_cancel",
       "sb_workflow_list",
       "sb_workflow_template",

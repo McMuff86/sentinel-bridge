@@ -704,6 +704,28 @@ function buildTools(): ToolDef[] {
       },
     },
     {
+      name: 'sb_workflow_resume',
+      description:
+        'Resume an interrupted or running workflow. Steps that were mid-flight ' +
+        'are reset to pending and re-executed. Completed steps are preserved.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Workflow id to resume' },
+        },
+        required: ['id'],
+      },
+      handler: async (params, ctx) => {
+        const id = readRequiredString(params, 'id');
+        const state = await ctx.manager.resumeWorkflow(id);
+
+        return {
+          ok: true,
+          workflow: state,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
       name: 'sb_workflow_cancel',
       description: 'Cancel a running workflow. Pending steps are marked as skipped.',
       parameters: {
