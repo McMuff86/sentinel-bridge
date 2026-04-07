@@ -136,6 +136,10 @@ function buildTools(): ToolDef[] {
             type: 'string',
             description: 'Resume an existing engine session when supported',
           },
+          role: {
+            type: 'string',
+            description: 'Agent role id (e.g. "architect", "implementer", "reviewer", "tester"). Sets system prompt and preferred engine/model.',
+          },
         },
         required: ['name'],
       },
@@ -146,6 +150,7 @@ function buildTools(): ToolDef[] {
           model: readOptionalString(params, 'model'),
           cwd: readOptionalString(params, 'cwd'),
           resumeSessionId: readOptionalString(params, 'resumeSessionId'),
+          role: readOptionalString(params, 'role'),
         });
 
         return {
@@ -432,6 +437,512 @@ function buildTools(): ToolDef[] {
         } satisfies ToolHandlerResponse;
       },
     },
+
+    /* ── Context (Blackboard) tools ─────────────────────────────── */
+
+    {
+      name: 'sb_context_set',
+      description:
+        'Set a key-value pair in a shared workspace context (blackboard). ' +
+        'Any session can read values set by other sessions within the same workspace.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace identifier' },
+          key: { type: 'string', description: 'Context key (1-128 chars)' },
+          value: { description: 'JSON-serializable value to store' },
+          session: { type: 'string', description: 'Session name that is writing this value' },
+        },
+        required: ['workspace', 'key', 'value', 'session'],
+      },
+      handler: async (params, ctx) => {
+        const entry = await ctx.manager.setContext(
+          readRequiredString(params, 'workspace'),
+          readRequiredString(params, 'key'),
+          params['value'],
+          readRequiredString(params, 'session'),
+        );
+
+        return {
+          ok: true,
+          workspace: readRequiredString(params, 'workspace'),
+          key: entry.key,
+          entry,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_context_get',
+      description: 'Get a value from the shared workspace context by key.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace identifier' },
+          key: { type: 'string', description: 'Context key to retrieve' },
+        },
+        required: ['workspace', 'key'],
+      },
+      handler: async (params, ctx) => {
+        const workspace = readRequiredString(params, 'workspace');
+        const key = readRequiredString(params, 'key');
+        const entry = ctx.manager.getContext(workspace, key);
+
+        return {
+          ok: true,
+          workspace,
+          key,
+          found: entry !== undefined,
+          entry: entry ?? null,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_context_list',
+      description: 'List all entries in a shared workspace context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace identifier' },
+        },
+        required: ['workspace'],
+      },
+      handler: async (params, ctx) => {
+        const workspace = readRequiredString(params, 'workspace');
+        const entries = ctx.manager.listContext(workspace);
+
+        return {
+          ok: true,
+          workspace,
+          count: entries.length,
+          entries,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_context_clear',
+      description: 'Clear all entries in a shared workspace context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          workspace: { type: 'string', description: 'Workspace identifier' },
+          session: { type: 'string', description: 'Session name performing the clear' },
+        },
+        required: ['workspace', 'session'],
+      },
+      handler: async (params, ctx) => {
+        const workspace = readRequiredString(params, 'workspace');
+        await ctx.manager.clearContext(
+          workspace,
+          readRequiredString(params, 'session'),
+        );
+
+        return {
+          ok: true,
+          workspace,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
+    /* ── Task routing tools ──────────────────────────────────────── */
+
+    {
+      name: 'sb_route_task',
+      description:
+        'Analyze a task description and recommend the best engine and model. ' +
+        'Advisory only — does not start a session. Use the prefer parameter ' +
+        'to prioritize speed, cost, or capability.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task: { type: 'string', description: 'Task description to analyze' },
+          prefer: {
+            type: 'string',
+            enum: ['fast', 'cheap', 'capable'],
+            description: 'Routing preference (default: balanced)',
+          },
+        },
+        required: ['task'],
+      },
+      handler: async (params, ctx) => {
+        const { routeTask } = await import('./orchestration/task-router.js');
+        const task = readRequiredString(params, 'task');
+        const prefer = readOptionalString(params, 'prefer') as 'fast' | 'cheap' | 'capable' | undefined;
+
+        const result = routeTask(
+          task,
+          (engine) => {
+            const descriptor = getEngineDescriptor(engine, ctx.config);
+            return {
+              engine,
+              available: descriptor.available,
+              healthy: descriptor.healthy,
+            };
+          },
+          prefer,
+        );
+
+        return {
+          ok: true,
+          ...result,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
+    /* ── Workflow tools ──────────────────────────────────────────── */
+
+    {
+      name: 'sb_workflow_start',
+      description:
+        'Start a multi-step workflow defined as a DAG. Steps execute in dependency order, ' +
+        'with parallel execution where possible. Each step creates a session and sends a task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          definition: {
+            type: 'object',
+            description: 'WorkflowDefinition with id, name, workspace, and steps array',
+            properties: {
+              id: { type: 'string' },
+              name: { type: 'string' },
+              description: { type: 'string' },
+              workspace: { type: 'string' },
+              steps: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    sessionName: { type: 'string' },
+                    role: { type: 'string' },
+                    task: { type: 'string' },
+                    dependsOn: { type: 'array', items: { type: 'string' } },
+                    engine: { type: 'string', enum: ENGINE_KINDS },
+                    model: { type: 'string' },
+                  },
+                  required: ['id', 'sessionName', 'task'],
+                },
+              },
+            },
+            required: ['id', 'name', 'workspace', 'steps'],
+          },
+        },
+        required: ['definition'],
+      },
+      handler: async (params, ctx) => {
+        const definition = params['definition'] as import('./orchestration/workflow-types.js').WorkflowDefinition;
+        const state = await ctx.manager.startWorkflow(definition);
+
+        return {
+          ok: true,
+          workflow: state,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_workflow_status',
+      description: 'Get the current status of a workflow and all its steps.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Workflow id' },
+        },
+        required: ['id'],
+      },
+      handler: async (params, ctx) => {
+        const id = readRequiredString(params, 'id');
+        const state = ctx.manager.getWorkflowStatus(id);
+        if (!state) {
+          throw new Error(`Workflow "${id}" not found.`);
+        }
+
+        return {
+          ok: true,
+          workflow: state,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_workflow_cancel',
+      description: 'Cancel a running workflow. Pending steps are marked as skipped.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Workflow id' },
+        },
+        required: ['id'],
+      },
+      handler: async (params, ctx) => {
+        const id = readRequiredString(params, 'id');
+        const state = ctx.manager.cancelWorkflow(id);
+
+        return {
+          ok: true,
+          id,
+          status: state.status,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_workflow_list',
+      description: 'List all workflows and their status.',
+      parameters: { type: 'object', properties: {} },
+      handler: async (_params, ctx) => {
+        const workflows = ctx.manager.listWorkflows();
+
+        return {
+          ok: true,
+          count: workflows.length,
+          workflows: workflows.map(w => ({
+            id: w.id,
+            name: w.definition.name,
+            status: w.status,
+            stepCount: Object.keys(w.steps).length,
+            completedSteps: Object.values(w.steps).filter(s => s.status === 'completed').length,
+            failedSteps: Object.values(w.steps).filter(s => s.status === 'failed').length,
+            createdAt: w.createdAt,
+            updatedAt: w.updatedAt,
+          })),
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_workflow_template',
+      description:
+        'Generate a WorkflowDefinition from a template pattern without executing it. ' +
+        'Supported patterns: "pipeline" (linear chain) and "fan-out-fan-in" (parallel + aggregator).',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            enum: ['pipeline', 'fan-out-fan-in'],
+            description: 'Workflow pattern',
+          },
+          id: { type: 'string', description: 'Workflow id' },
+          name: { type: 'string', description: 'Workflow name' },
+          workspace: { type: 'string', description: 'Workspace for shared context' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                sessionName: { type: 'string' },
+                task: { type: 'string' },
+                role: { type: 'string' },
+                engine: { type: 'string', enum: ENGINE_KINDS },
+                model: { type: 'string' },
+              },
+              required: ['id', 'sessionName', 'task'],
+            },
+            description: 'Steps for the workflow. For fan-out-fan-in, the last step is the aggregator.',
+          },
+        },
+        required: ['pattern', 'id', 'name', 'workspace', 'steps'],
+      },
+      handler: async (params, _ctx) => {
+        const { createPipelineWorkflow, createFanOutFanInWorkflow } = await import('./orchestration/workflow-templates.js');
+        const pattern = readRequiredString(params, 'pattern');
+        const id = readRequiredString(params, 'id');
+        const name = readRequiredString(params, 'name');
+        const workspace = readRequiredString(params, 'workspace');
+        const steps = params['steps'] as Array<{
+          id: string;
+          sessionName: string;
+          task: string;
+          role?: string;
+          engine?: import('./types.js').EngineKind;
+          model?: string;
+        }>;
+
+        let definition;
+        if (pattern === 'pipeline') {
+          definition = createPipelineWorkflow(id, name, workspace, steps);
+        } else if (pattern === 'fan-out-fan-in') {
+          if (steps.length < 2) {
+            throw new Error('Fan-out-fan-in requires at least 2 steps (fan-out + aggregator).');
+          }
+          const fanOut = steps.slice(0, -1);
+          const fanIn = steps[steps.length - 1];
+          definition = createFanOutFanInWorkflow(id, name, workspace, fanOut, fanIn);
+        } else {
+          throw new Error(`Unknown pattern "${pattern}". Use "pipeline" or "fan-out-fan-in".`);
+        }
+
+        return {
+          ok: true,
+          pattern,
+          definition,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
+    /* ── Relay tools ────────────────────────────────────────────── */
+
+    {
+      name: 'sb_session_relay',
+      description:
+        'Relay a message from one session to another. The message is sent as input to the target session. ' +
+        'Use this to chain session outputs as inputs for pipeline workflows.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Source session name' },
+          to: { type: 'string', description: 'Target session name' },
+          message: { type: 'string', description: 'Message to relay' },
+          stream: {
+            type: 'boolean',
+            description: 'Enable streaming for incremental output (default: false)',
+          },
+        },
+        required: ['from', 'to', 'message'],
+      },
+      handler: async (params, ctx) => {
+        const wantsStream = params['stream'] === true;
+        const chunks: string[] = [];
+        const onChunk = wantsStream
+          ? (chunk: string) => { chunks.push(chunk); }
+          : undefined;
+
+        const result = await ctx.manager.relayMessage(
+          readRequiredString(params, 'from'),
+          readRequiredString(params, 'to'),
+          readRequiredString(params, 'message'),
+          onChunk,
+        );
+
+        const serialized = serializeTurnResult(result.sendResult);
+        serialized.relayFrom = result.from;
+        serialized.relayTo = result.to;
+        if (wantsStream && chunks.length > 0) {
+          serialized.streamed = true;
+          serialized.chunkCount = chunks.length;
+        }
+
+        return serialized;
+      },
+    },
+    {
+      name: 'sb_session_broadcast',
+      description:
+        'Broadcast a message to all active sessions (except the sender and optionally excluded sessions). ' +
+        'Uses Promise.allSettled so one failure does not block others.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', description: 'Source session name' },
+          message: { type: 'string', description: 'Message to broadcast' },
+          exclude: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Session names to exclude from broadcast',
+          },
+        },
+        required: ['from', 'message'],
+      },
+      handler: async (params, ctx) => {
+        const exclude = Array.isArray(params['exclude']) ? params['exclude'] as string[] : undefined;
+        const result = await ctx.manager.broadcastMessage(
+          readRequiredString(params, 'from'),
+          readRequiredString(params, 'message'),
+          exclude,
+        );
+
+        return {
+          ok: true,
+          from: result.from,
+          targets: result.targets,
+          totalTargets: result.targets.length,
+          succeeded: result.results.filter(r => r.ok).length,
+          failed: result.results.filter(r => !r.ok).length,
+          results: result.results.map(r => ({
+            to: r.to,
+            ok: r.ok,
+            error: r.error,
+          })),
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
+    /* ── Role tools ─────────────────────────────────────────────── */
+
+    {
+      name: 'sb_role_list',
+      description: 'List all available agent roles (built-in and custom).',
+      parameters: { type: 'object', properties: {} },
+      handler: async (_params, ctx) => {
+        return {
+          ok: true,
+          roles: ctx.manager.roles.list(),
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_role_get',
+      description: 'Get details of a specific agent role.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Role id (e.g. "architect")' },
+        },
+        required: ['id'],
+      },
+      handler: async (params, ctx) => {
+        const id = readRequiredString(params, 'id');
+        const role = ctx.manager.roles.get(id);
+        if (!role) {
+          throw new Error(`Role "${id}" not found.`);
+        }
+
+        return {
+          ok: true,
+          role,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_role_register',
+      description:
+        'Register a custom agent role with a system prompt and optional engine/model preferences.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Unique role id' },
+          name: { type: 'string', description: 'Display name' },
+          description: { type: 'string', description: 'Role description' },
+          systemPrompt: { type: 'string', description: 'System prompt injected on session start' },
+          preferredEngine: {
+            type: 'string',
+            enum: ENGINE_KINDS,
+            description: 'Default engine for this role',
+          },
+          preferredModel: { type: 'string', description: 'Default model for this role' },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tags for categorization',
+          },
+        },
+        required: ['id', 'name', 'description', 'systemPrompt'],
+      },
+      handler: async (params, ctx) => {
+        const role = {
+          id: readRequiredString(params, 'id'),
+          name: readRequiredString(params, 'name'),
+          description: readRequiredString(params, 'description'),
+          systemPrompt: readRequiredString(params, 'systemPrompt'),
+          preferredEngine: readEngineKind(params, 'preferredEngine'),
+          preferredModel: readOptionalString(params, 'preferredModel'),
+          tags: Array.isArray(params['tags']) ? params['tags'] as string[] : undefined,
+        };
+        ctx.manager.registerRole(role);
+
+        return {
+          ok: true,
+          role,
+        } satisfies ToolHandlerResponse;
+      },
+    },
   ];
 }
 
@@ -673,6 +1184,7 @@ function serializeSession(session: {
     isRehydrated: boolean;
   };
   turnCount: number;
+  role?: string;
 }): Record<string, unknown> {
   return {
     id: session.id,
@@ -710,6 +1222,7 @@ function serializeSession(session: {
       isRehydrated: session.activity.isRehydrated,
     },
     turnCount: session.turnCount,
+    role: session.role,
   };
 }
 

@@ -65,6 +65,7 @@ export function toSessionInfo(
       isRehydrated: record.isRehydrated,
     },
     turnCount: record.turnCount,
+    role: record.role,
   };
 }
 

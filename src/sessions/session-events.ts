@@ -9,10 +9,12 @@ export type SessionEventType =
   | 'message_sent'
   | 'message_completed'
   | 'message_failed'
+  | 'message_relayed'
   | 'status_checked'
   | 'compact_started'
   | 'compact_completed'
-  | 'session_stopped';
+  | 'session_stopped'
+  | 'system_prompt_injected';
 
 export interface SessionEvent {
   ts: string;
@@ -21,6 +23,8 @@ export interface SessionEvent {
   sessionName: string;
   preview?: string;
   error?: string;
+  relayFrom?: string;
+  relayTo?: string;
 }
 
 function getDefaultEventsDir(): string {

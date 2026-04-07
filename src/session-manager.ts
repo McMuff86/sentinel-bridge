@@ -6,6 +6,15 @@ import {
   mergeTokenUsage,
   roundUsd,
 } from './engines/shared.js';
+import { ContextStore } from './orchestration/context-store.js';
+import type { ContextEntry } from './orchestration/context-store.js';
+import { ContextEventStore } from './orchestration/context-events.js';
+import { RoleRegistry } from './orchestration/roles.js';
+import type { AgentRole } from './orchestration/roles.js';
+import { RoleStore } from './orchestration/role-store.js';
+import type { RelayResult, BroadcastResult, BroadcastTargetResult } from './orchestration/relay.js';
+import { WorkflowEngine } from './orchestration/workflow-engine.js';
+import type { WorkflowDefinition, WorkflowState } from './orchestration/workflow-types.js';
 import { expandFallbackChain } from './routing/expand-fallback-chain.js';
 import {
   appendRoutingAttempt,
@@ -70,6 +79,11 @@ export class SessionManager {
   private readonly mutex = new SessionMutex();
   private readonly rehydrating = new Set<string>();
   readonly events = new SessionEventStore();
+  readonly context = new ContextStore();
+  readonly contextEvents = new ContextEventStore();
+  readonly roles: RoleRegistry;
+  private readonly roleStore = new RoleStore();
+  readonly workflows = new WorkflowEngine();
   readonly log: StructuredLogger;
   private cleanupTimer: {
     unref?: () => void;
@@ -77,6 +91,7 @@ export class SessionManager {
 
   constructor(config: SentinelBridgeConfig = {}, externalLogger?: ExternalLogger) {
     this.config = config;
+    this.roles = new RoleRegistry(this.roleStore.list());
     this.log = new StructuredLogger(externalLogger);
 
     const cleanupIntervalMs =
@@ -94,12 +109,21 @@ export class SessionManager {
   }
 
   async startSession(options: SessionStartOptions): Promise<SessionInfo> {
-    const routedPrimary = options.model
-      ? this.resolveModelRoute(options.model, options.engine)
+    // Resolve role and apply role defaults for engine/model if not explicitly set
+    const role = options.role ? this.roles.get(options.role) : undefined;
+    if (options.role && !role) {
+      throw new Error(`Unknown role "${options.role}". Use sb_role_list to see available roles.`);
+    }
+
+    const effectiveEngine = options.engine ?? role?.preferredEngine;
+    const effectiveModel = options.model ?? role?.preferredModel;
+
+    const routedPrimary = effectiveModel
+      ? this.resolveModelRoute(effectiveModel, effectiveEngine)
       : undefined;
     const primaryEngine = selectPrimaryEngine(
       this.config,
-      options,
+      { ...options, engine: effectiveEngine },
       routedPrimary?.engine,
     );
     const primaryRoute = routedPrimary ?? this.resolveDefaultRoute(primaryEngine);
@@ -136,6 +160,7 @@ export class SessionManager {
           routingTrace,
           toRoutingAttempt({ engine, model: route.model }),
         );
+        record.role = options.role;
 
         const info = this.requireSessionInfo(options.name);
         this.store.upsert(info);
@@ -143,7 +168,34 @@ export class SessionManager {
         this.log.info('session', `Session "${options.name}" started on ${engine}/${route.model}`, {
           session: options.name,
           engine,
+          meta: { role: options.role },
         });
+
+        // Inject system prompt if role has one
+        if (role?.systemPrompt) {
+          try {
+            await this.send(options.name, role.systemPrompt);
+            this.emit('system_prompt_injected', options.name, engine, {
+              preview: `[${role.id}] system prompt`,
+            });
+            this.log.info('orchestration', `System prompt injected for role "${role.id}" in session "${options.name}"`, {
+              session: options.name,
+              engine,
+            });
+            // Refresh info after prompt injection to capture updated token/cost
+            const refreshed = this.requireSessionInfo(options.name);
+            this.store.upsert(refreshed);
+            return refreshed;
+          } catch (promptError) {
+            const errMsg = promptError instanceof Error ? promptError.message : String(promptError);
+            this.log.warn('orchestration', `System prompt injection failed for "${options.name}": ${errMsg}`, {
+              session: options.name,
+              engine,
+            });
+            // Session remains active — system prompt failure is non-fatal
+          }
+        }
+
         return info;
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -803,6 +855,7 @@ export class SessionManager {
       lastResponsePreview: session.activity.lastResponsePreview,
       isRehydrated: true,
       turnCount: session.turnCount,
+      role: session.role,
     };
 
     syncSession(record);
@@ -869,6 +922,172 @@ export class SessionManager {
       sessionName: name,
       ...extra,
     });
+  }
+
+  /* ── Workflow operations ────────────────────────────────────── */
+
+  async startWorkflow(definition: WorkflowDefinition): Promise<WorkflowState> {
+    this.log.info('orchestration', `Starting workflow "${definition.id}" with ${definition.steps.length} steps`, {
+      meta: { workflowId: definition.id, workspace: definition.workspace },
+    });
+    return this.workflows.start(definition, this);
+  }
+
+  getWorkflowStatus(id: string): WorkflowState | undefined {
+    return this.workflows.getStatus(id);
+  }
+
+  cancelWorkflow(id: string): WorkflowState {
+    this.log.info('orchestration', `Cancelling workflow "${id}"`, {
+      meta: { workflowId: id },
+    });
+    return this.workflows.cancel(id);
+  }
+
+  listWorkflows(): WorkflowState[] {
+    return this.workflows.list();
+  }
+
+  /* ── Relay operations ───────────────────────────────────────── */
+
+  async relayMessage(
+    from: string,
+    to: string,
+    message: string,
+    onChunk?: (chunk: string) => void,
+  ): Promise<RelayResult> {
+    validateSessionName(from);
+    validateSessionName(to);
+
+    // Validate source session exists
+    const fromRecord = this.sessions.get(from);
+    if (!fromRecord) {
+      const persisted = this.store.get(from);
+      if (!persisted) throw new Error(`Source session "${from}" not found.`);
+    }
+
+    // Send to target (sendMessage handles its own validation and mutex)
+    const sendResult = await this.sendMessage(to, message, onChunk);
+
+    // Emit relay events on both session timelines
+    const toRecord = this.requireSession(to);
+    this.emit('message_relayed', from, fromRecord?.session.engine ?? toRecord.session.engine, {
+      preview: `relay → ${to}`,
+    });
+    this.emit('message_relayed', to, toRecord.session.engine, {
+      preview: `relay ← ${from}`,
+    });
+
+    this.log.info('orchestration', `Relayed message from "${from}" to "${to}"`, {
+      session: to,
+      engine: toRecord.session.engine,
+      meta: { from, to },
+    });
+
+    return { from, to, message, sendResult };
+  }
+
+  async broadcastMessage(
+    from: string,
+    message: string,
+    exclude?: string[],
+  ): Promise<BroadcastResult> {
+    validateSessionName(from);
+
+    const excludeSet = new Set(exclude ?? []);
+    excludeSet.add(from);
+
+    const activeSessions = this.listSessions().filter(
+      (s) => s.status === 'active' && !excludeSet.has(s.name),
+    );
+    const targets = activeSessions.map((s) => s.name);
+
+    const settled = await Promise.allSettled(
+      targets.map(async (to): Promise<BroadcastTargetResult> => {
+        try {
+          const sendResult = await this.sendMessage(to, message);
+          return { to, ok: true, sendResult };
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          return { to, ok: false, error: errMsg };
+        }
+      }),
+    );
+
+    const results: BroadcastTargetResult[] = settled.map((s) =>
+      s.status === 'fulfilled'
+        ? s.value
+        : { to: 'unknown', ok: false, error: s.reason instanceof Error ? s.reason.message : String(s.reason) },
+    );
+
+    this.log.info('orchestration', `Broadcast from "${from}" to ${targets.length} sessions`, {
+      meta: { from, targets, successCount: results.filter(r => r.ok).length },
+    });
+
+    return { from, targets, message, results };
+  }
+
+  /* ── Role operations ────────────────────────────────────────── */
+
+  registerRole(role: AgentRole): void {
+    this.roles.register(role);
+    this.roleStore.upsert(role);
+    this.log.info('orchestration', `Custom role "${role.id}" registered`, {
+      meta: { roleId: role.id },
+    });
+  }
+
+  /* ── Context (Blackboard) operations ──────────────────────────── */
+
+  async setContext(
+    workspace: string,
+    key: string,
+    value: unknown,
+    setBy: string,
+  ): Promise<ContextEntry> {
+    const release = await this.mutex.acquire(`ctx::${workspace}`);
+    try {
+      const entry = this.context.set(workspace, key, value, setBy);
+      this.contextEvents.appendEvent({
+        ts: new Date().toISOString(),
+        type: 'context_set',
+        workspace,
+        key,
+        setBy,
+      });
+      this.log.info('context', `Context "${key}" set in workspace "${workspace}" by "${setBy}"`, {
+        meta: { workspace, key, setBy },
+      });
+      return entry;
+    } finally {
+      release();
+    }
+  }
+
+  getContext(workspace: string, key: string): ContextEntry | undefined {
+    return this.context.get(workspace, key);
+  }
+
+  listContext(workspace: string): ContextEntry[] {
+    return this.context.list(workspace);
+  }
+
+  async clearContext(workspace: string, clearedBy: string): Promise<void> {
+    const release = await this.mutex.acquire(`ctx::${workspace}`);
+    try {
+      this.context.clear(workspace);
+      this.contextEvents.appendEvent({
+        ts: new Date().toISOString(),
+        type: 'context_cleared',
+        workspace,
+        setBy: clearedBy,
+      });
+      this.log.info('context', `Context cleared for workspace "${workspace}" by "${clearedBy}"`, {
+        meta: { workspace, clearedBy },
+      });
+    } finally {
+      release();
+    }
   }
 
   private wrapSessionError(

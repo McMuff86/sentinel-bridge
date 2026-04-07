@@ -22,7 +22,9 @@ export type LogCategory =
   | 'expiry'
   | 'store'
   | 'config'
-  | 'cleanup';
+  | 'cleanup'
+  | 'context'
+  | 'orchestration';
 
 export interface LogEntry {
   ts: string;

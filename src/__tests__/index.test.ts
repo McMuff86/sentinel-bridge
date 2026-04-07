@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { activate, PLUGIN_META } from '../index.js';
 
 describe('activate', () => {
-  it('registers all 12 tools', () => {
+  it('registers all tools', () => {
     const registered: string[] = [];
     const mockApi = {
       registerTool: vi.fn((tool: { name: string }) => {
@@ -14,7 +14,7 @@ describe('activate', () => {
 
     activate(mockApi);
 
-    expect(registered).toHaveLength(13);
+    expect(registered).toHaveLength(28);
     expect(registered).toContain('sb_session_start');
     expect(registered).toContain('sb_session_send');
     expect(registered).toContain('sb_session_stop');
@@ -28,6 +28,21 @@ describe('activate', () => {
     expect(registered).toContain('sb_compact');
     expect(registered).toContain('sb_session_events');
     expect(registered).toContain('sb_session_cancel');
+    expect(registered).toContain('sb_context_set');
+    expect(registered).toContain('sb_context_get');
+    expect(registered).toContain('sb_context_list');
+    expect(registered).toContain('sb_context_clear');
+    expect(registered).toContain('sb_role_list');
+    expect(registered).toContain('sb_role_get');
+    expect(registered).toContain('sb_role_register');
+    expect(registered).toContain('sb_session_relay');
+    expect(registered).toContain('sb_session_broadcast');
+    expect(registered).toContain('sb_workflow_start');
+    expect(registered).toContain('sb_workflow_status');
+    expect(registered).toContain('sb_workflow_cancel');
+    expect(registered).toContain('sb_workflow_list');
+    expect(registered).toContain('sb_workflow_template');
+    expect(registered).toContain('sb_route_task');
   });
 
   it('registers claude and codex CLI backends', () => {

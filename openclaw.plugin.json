@@ -101,7 +101,22 @@
       "sb_cost_report",
       "sb_compact",
       "sb_session_events",
-      "sb_session_cancel"
+      "sb_session_cancel",
+      "sb_context_set",
+      "sb_context_get",
+      "sb_context_list",
+      "sb_context_clear",
+      "sb_role_list",
+      "sb_role_get",
+      "sb_role_register",
+      "sb_session_relay",
+      "sb_session_broadcast",
+      "sb_workflow_start",
+      "sb_workflow_status",
+      "sb_workflow_cancel",
+      "sb_workflow_list",
+      "sb_workflow_template",
+      "sb_route_task"
     ],
     "exports": {
       "activate": "activate"

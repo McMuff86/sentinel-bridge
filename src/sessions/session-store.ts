@@ -32,6 +32,7 @@ type PersistedSessionRecord = {
     isRehydrated: boolean;
   };
   turnCount?: number;
+  role?: string;
 };
 
 type SessionStoreData = {
@@ -112,6 +113,7 @@ export class SessionStore {
         isRehydrated: session.activity.isRehydrated,
       },
       turnCount: session.turnCount,
+      role: session.role,
     };
     this.save(data);
   }
@@ -174,5 +176,6 @@ function toSessionInfoFromPersisted(item: PersistedSessionRecord): SessionInfo {
           isRehydrated: false,
         },
     turnCount: item.turnCount ?? 0,
+    role: item.role,
   };
 }

@@ -107,6 +107,7 @@ export interface SessionStartOptions {
   model?: string;
   cwd?: string;
   resumeSessionId?: string;
+  role?: string;
 }
 
 export interface RoutingTraceAttempt {
@@ -145,6 +146,7 @@ export interface SessionInfo extends ISession {
   routingTrace?: RoutingTrace;
   activity: SessionActivity;
   turnCount: number;
+  role?: string;
 }
 
 export interface TurnUsage {
