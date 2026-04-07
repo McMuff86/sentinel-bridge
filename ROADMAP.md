@@ -114,7 +114,16 @@ All 33 tools are available as native MCP tool calls via `node dist/mcp/index.js`
 
 Setup: `claude mcp add sentinel-bridge -- node dist/mcp/index.js`
 
-## Integration: Mission-Control (in progress)
+## Integration: Mission-Control (done)
+
+Sentinel-Bridge is fully integrated into Mission-Control:
+
+- **REST API Layer:** `routes/sentinel.js` — 25+ endpoints for sessions, workflows, factory, roles, context, cost, circuit breaker, health checks, SSE streaming
+- **Frontend Client:** `src/lib/sentinel-api.ts` — typed API client
+- **BridgeView:** Migrated from legacy `bridge.js` to sentinel API — engine health, sessions, cost breakdown all powered by sentinel SessionManager
+- **Factory Integration:** Factory-Start uses `sb_workflow_start` for DAG-based execution
+- **SSE Live Feed:** `/api/sentinel/sessions/stream` pushes real-time state updates
+- **Engine Toggle:** Circuit breaker reset as "enable" mechanism
 
 Sentinel-Bridge is now integrated into Mission-Control as a local dependency (`file:../sentinel-bridge`). The integration exposes all 31 tools as REST endpoints via `routes/sentinel.js`:
 

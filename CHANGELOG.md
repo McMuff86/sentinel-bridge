@@ -4,6 +4,14 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Changed — Mission-Control BridgeView Migration
+- **BridgeView** now powered entirely by sentinel-bridge API instead of
+  legacy `bridge.js` routes. Engine health, sessions, and cost data all
+  come from SessionManager with circuit breaker + health checker.
+- **New endpoints:** `GET /api/sentinel/overview` (BridgeView-compatible),
+  `GET /api/sentinel/sessions/stream` (SSE live feed).
+- **Ollama visible and enabled** in BridgeView with gemma4 as default model.
+
 ### Added — MCP Server
 - **Model Context Protocol server** — all 33 tools exposed via MCP (JSON-RPC
   2.0 over stdio). LLM agents (Claude Code, Cursor, etc.) can use sentinel-bridge
