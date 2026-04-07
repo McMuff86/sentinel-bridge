@@ -217,6 +217,39 @@ The codebase is split into focused modules:
 - `src/tracking.ts` — usage tracking with JSONL logging
 - `src/plugin.ts` — plugin metadata, config types, defaults
 
+## MCP Server
+
+sentinel-bridge includes a built-in MCP (Model Context Protocol) server, so LLM agents can use all 33 tools as native tool calls — no HTTP workarounds needed.
+
+### Setup with Claude Code
+
+```bash
+# Build first
+npm run build
+
+# Add as MCP server
+claude mcp add sentinel-bridge -- node /path/to/sentinel-bridge/dist/mcp/index.js
+```
+
+### Setup via config file (.mcp.json)
+
+```json
+{
+  "mcpServers": {
+    "sentinel-bridge": {
+      "command": "node",
+      "args": ["/path/to/sentinel-bridge/dist/mcp/index.js"]
+    }
+  }
+}
+```
+
+### Run standalone
+
+```bash
+npm run mcp
+```
+
 ## Tools (33)
 
 Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters):

@@ -83,6 +83,10 @@ sentinel-bridge/
 │   │   ├── session-cleanup.ts    # TTL expiry sweep
 │   │   ├── session-info.ts       # Session payload shaping, syncSession()
 │   │   └── types.ts              # SessionRecord internal type
+│   ├── mcp/
+│   │   ├── index.ts              # MCP server entry point (stdio)
+│   │   ├── server.ts             # JSON-RPC 2.0 protocol handler
+│   │   └── tools.ts              # Maps all 33 sb_* tools to MCP format
 │   └── __tests__/
 │       ├── session-manager.test.ts
 │       ├── claude-engine.test.ts
@@ -110,6 +114,7 @@ sentinel-bridge/
 │       ├── circuit-breaker.test.ts
 │       ├── health-check.test.ts
 │       ├── session-queue.test.ts
+│       ├── mcp-server.test.ts
 │       └── routing.test.ts
 └── dist/                         # Compiled output (gitignored)
 ```
@@ -117,7 +122,7 @@ sentinel-bridge/
 ## Testing Strategy
 
 - **Framework:** vitest (run via `npx vitest run`)
-- **Unit tests:** 381 tests across 28 test files in `src/__tests__/`
+- **Unit tests:** 390 tests across 29 test files in `src/__tests__/`
 - **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama, mock stores for orchestration
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually

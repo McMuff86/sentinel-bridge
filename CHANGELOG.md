@@ -4,6 +4,14 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Added — MCP Server
+- **Model Context Protocol server** — all 33 tools exposed via MCP (JSON-RPC
+  2.0 over stdio). LLM agents (Claude Code, Cursor, etc.) can use sentinel-bridge
+  tools as native tool calls — no HTTP workarounds needed.
+- **Zero dependencies** — MCP protocol implemented directly with Node.js stdin/stdout.
+- **Entry point:** `node dist/mcp/index.js` or `npm run mcp` or `sentinel-bridge-mcp` (bin).
+- **Setup:** `claude mcp add sentinel-bridge -- node dist/mcp/index.js`
+
 ### Added — Backpressure & Session Queue
 - **Priority session queue** — when `maxConcurrentSessions` is reached, new
   session starts wait in a queue instead of being rejected. Three priority

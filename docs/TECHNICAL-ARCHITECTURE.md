@@ -136,6 +136,36 @@ cancel() → abort AbortController → stay running
 stop()   → abort + state = stopped
 ```
 
+## MCP Server
+
+The `src/mcp/` directory contains a built-in Model Context Protocol server that exposes all 33 tools via JSON-RPC 2.0 over stdio. This allows LLM agents to use sentinel-bridge tools as native tool calls.
+
+### Architecture
+```
+LLM Agent (Claude Code, Cursor, etc.)
+    │ MCP protocol (JSON-RPC 2.0 over stdio)
+    ▼
+McpServer (src/mcp/server.ts)
+    │ dispatches tool calls
+    ▼
+buildMcpTools() (src/mcp/tools.ts)
+    │ bridges to SessionManager
+    ▼
+SessionManager (same as plugin mode)
+```
+
+### Protocol
+- Transport: newline-delimited JSON on stdin/stdout
+- Methods: `initialize`, `tools/list`, `tools/call`, `ping`
+- All 33 `sb_*` tools registered with JSON Schema input validation
+- Errors returned as `{ content: [{ type: "text", text: "..." }], isError: true }`
+- Server info on stderr (doesn't interfere with protocol)
+
+### Entry Point
+- `src/mcp/index.ts` → compiled to `dist/mcp/index.js`
+- Creates SessionManager, registers tools, starts stdio listener
+- Graceful shutdown on SIGINT/SIGTERM
+
 ## Orchestration Layer
 
 The `src/orchestration/` directory contains the multi-agent orchestration features that sit on top of the SessionManager:

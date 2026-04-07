@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "sentinel-bridge-mcp": "./dist/mcp/index.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -30,7 +33,8 @@
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "npm run build",
     "test": "vitest run --passWithNoTests",
-    "lint": "tsc --noEmit -p tsconfig.json"
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "mcp": "node dist/mcp/index.js"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

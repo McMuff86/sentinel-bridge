@@ -1,6 +1,6 @@
 # Roadmap — sentinel-bridge
 
-Current state: 33 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, circuit breaker, health checks, and backpressure queue. 381 tests, zero runtime dependencies. Integrated into Mission-Control via REST API layer.
+Current state: 33 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, circuit breaker, health checks, backpressure queue, and MCP server. 390 tests, zero runtime dependencies. Integrated into Mission-Control via REST API layer + MCP for native agent tool access.
 
 ---
 
@@ -107,6 +107,12 @@ Current state: 33 tools, 4 engines, multi-agent orchestration with workflows (wi
 - Community role marketplace (share and import role definitions)
 
 ---
+
+## MCP Server (done)
+
+All 33 tools are available as native MCP tool calls via `node dist/mcp/index.js`. Zero additional dependencies — MCP JSON-RPC 2.0 protocol implemented directly on Node.js stdio. Compatible with Claude Code, Cursor, and any MCP client.
+
+Setup: `claude mcp add sentinel-bridge -- node dist/mcp/index.js`
 
 ## Integration: Mission-Control (in progress)
 
