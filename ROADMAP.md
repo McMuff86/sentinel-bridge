@@ -1,6 +1,6 @@
 # Roadmap — sentinel-bridge
 
-Current state: 31 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, and circuit breaker. 359 tests, zero runtime dependencies.
+Current state: 32 tools, 4 engines, multi-agent orchestration with workflows (with recovery), roles, shared context, relay, content-based routing, circuit breaker, and health checks. 371 tests, zero runtime dependencies. Integrated into Mission-Control via REST API layer.
 
 ---
 
@@ -17,11 +17,11 @@ Current state: 31 tools, 4 engines, multi-agent orchestration with workflows (wi
 - ~~Re-enable after cooldown period or manual reset~~
 - ~~Expose circuit state via `sb_engine_status`, `sb_circuit_status`, `sb_circuit_reset`~~
 
-### Health Checks
-- Periodic engine reachability probes (not just on start)
-- Background health check interval (configurable)
-- Feed health status into routing decisions
-- Expose last-check timestamp and latency in engine descriptors
+### ~~Health Checks~~ (done)
+- ~~Periodic engine reachability probes (not just on start)~~
+- ~~Background health check interval (configurable)~~
+- ~~Feed health status into circuit breaker (success only — failures don't trip)~~
+- ~~Expose last-check timestamp and latency via `sb_engine_status` + `sb_health_check`~~
 
 ### Workflow Event Integration
 - Emit `workflow_started`, `workflow_step_completed`, `workflow_failed` events to session event timeline

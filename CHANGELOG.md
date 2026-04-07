@@ -4,6 +4,19 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Added — Health Checks
+- **Periodic engine health probes** — `HealthChecker` module probes all 4 engines:
+  CLI engines via PATH lookup, Grok via `/models` API ping, Ollama via root HTTP ping.
+  Configurable `intervalMs` (default: 2 min) and `probeTimeoutMs` (default: 5s).
+- **`sb_health_check`** tool — run health checks on-demand, starts periodic background
+  checks. Results include `healthy`, `latencyMs`, `checkedAt`, `error`.
+- **`sb_engine_status` enriched** — now includes health check results alongside
+  circuit breaker state.
+- **Circuit breaker integration** — healthy probes record success (help close
+  half-open circuits), but unhealthy probes do NOT record failure (health checks
+  inform, they don't penalize).
+- **Tool count:** 31 → 32 tools.
+
 ### Added — Workflow Recovery
 - **Workflow checkpointing** — workflow state is persisted to disk after each
   step completion/failure via `WorkflowStore`. Interrupted workflows (plugin

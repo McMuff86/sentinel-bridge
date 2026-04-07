@@ -17,6 +17,8 @@ import { WorkflowEngine } from './orchestration/workflow-engine.js';
 import type { WorkflowDefinition, WorkflowState } from './orchestration/workflow-types.js';
 import { CircuitBreaker } from './orchestration/circuit-breaker.js';
 import type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
+import { HealthChecker } from './orchestration/health-check.js';
+import type { HealthCheckResult } from './orchestration/health-check.js';
 import { expandFallbackChain } from './routing/expand-fallback-chain.js';
 import {
   appendRoutingAttempt,
@@ -87,6 +89,7 @@ export class SessionManager {
   private readonly roleStore = new RoleStore();
   readonly workflows: WorkflowEngine;
   readonly circuitBreaker: CircuitBreaker;
+  readonly healthChecker: HealthChecker;
   readonly log: StructuredLogger;
   private cleanupTimer: {
     unref?: () => void;
@@ -96,6 +99,7 @@ export class SessionManager {
     this.config = config;
     this.roles = new RoleRegistry(this.roleStore.list());
     this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
+    this.healthChecker = new HealthChecker(config.healthCheck, this.circuitBreaker);
     this.workflows = new WorkflowEngine();
     this.log = new StructuredLogger(externalLogger);
 
@@ -713,6 +717,7 @@ export class SessionManager {
   }
 
   async dispose(): Promise<void> {
+    this.healthChecker.stop();
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer as unknown as number);
       this.cleanupTimer = null;
@@ -946,6 +951,29 @@ export class SessionManager {
       sessionName: name,
       ...extra,
     });
+  }
+
+  /* ── Health check operations ────────────────────────────────── */
+
+  startHealthChecks(): void {
+    this.healthChecker.start();
+    this.log.info('orchestration', 'Health checks started');
+  }
+
+  stopHealthChecks(): void {
+    this.healthChecker.stop();
+  }
+
+  async runHealthCheck(engine?: EngineKind): Promise<HealthCheckResult[]> {
+    if (engine) {
+      const result = await this.healthChecker.check(engine);
+      return [result];
+    }
+    return this.healthChecker.checkAll();
+  }
+
+  getHealthResults(): HealthCheckResult[] {
+    return this.healthChecker.getAllResults();
   }
 
   /* ── Circuit breaker operations ─────────────────────────────── */

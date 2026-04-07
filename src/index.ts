@@ -52,6 +52,7 @@ export { EngineError, toEngineError } from './errors.js';
 export type { ErrorCategory } from './errors.js';
 export type { AgentRole } from './orchestration/roles.js';
 export type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
+export type { HealthCheckResult } from './orchestration/health-check.js';
 export type { TaskRoutingResult } from './orchestration/task-router.js';
 export { routeTask } from './orchestration/task-router.js';
 
@@ -319,6 +320,7 @@ function buildTools(): ToolDef[] {
           ok: true,
           engine: getEngineDescriptor(engine, ctx.config),
           circuit: ctx.manager.getCircuitState(engine),
+          health: ctx.manager.healthChecker.getResult(engine) ?? null,
         } satisfies ToolHandlerResponse;
       },
     },
@@ -557,6 +559,34 @@ function buildTools(): ToolDef[] {
 
     /* ── Circuit breaker tools ─────────────────────────────────── */
 
+    {
+      name: 'sb_health_check',
+      description:
+        'Run health checks on engines (or a specific engine). Returns availability, ' +
+        'latency, and error details. Also starts periodic background checks if not running.',
+      parameters: {
+        type: 'object',
+        properties: {
+          engine: {
+            type: 'string',
+            enum: ENGINE_KINDS,
+            description: 'Specific engine to check (omit for all)',
+          },
+        },
+      },
+      handler: async (params, ctx) => {
+        const engine = readEngineKind(params, 'engine');
+        const results = await ctx.manager.runHealthCheck(engine ?? undefined);
+
+        // Start periodic checks if not already running
+        ctx.manager.startHealthChecks();
+
+        return {
+          ok: true,
+          results,
+        } satisfies ToolHandlerResponse;
+      },
+    },
     {
       name: 'sb_circuit_status',
       description:
@@ -1396,6 +1426,7 @@ function toSessionManagerConfig(
     defaultModel: config.defaultModel,
     defaultFallbackChain: config.defaultFallbackChain,
     circuitBreaker: config.circuitBreaker,
+    healthCheck: config.healthCheck,
     claude: normalizeEngineConfig(config.engines?.claude),
     codex: normalizeEngineConfig(config.engines?.codex),
     grok: normalizeEngineConfig(config.engines?.grok),

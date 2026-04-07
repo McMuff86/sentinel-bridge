@@ -85,6 +85,14 @@ export interface SentinelBridgeConfig {
   defaultFallbackChain?: EngineKind[];
   /** Circuit breaker settings for automatic engine disabling after repeated failures. */
   circuitBreaker?: CircuitBreakerConfig;
+  /** Health check settings for periodic engine probing. */
+  healthCheck?: {
+    intervalMs?: number;
+    probeTimeoutMs?: number;
+    grokBaseUrl?: string;
+    grokApiKey?: string;
+    ollamaBaseUrl?: string;
+  };
   claude?: Partial<EngineConfig>;
   codex?: Partial<EngineConfig>;
   grok?: Partial<EngineConfig>;

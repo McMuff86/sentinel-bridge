@@ -62,6 +62,14 @@ export interface SentinelBridgeConfig {
     cooldownMs?: number;
     halfOpenSuccessThreshold?: number;
   };
+  /** Health check settings for periodic engine probing */
+  healthCheck?: {
+    intervalMs?: number;
+    probeTimeoutMs?: number;
+    grokBaseUrl?: string;
+    grokApiKey?: string;
+    ollamaBaseUrl?: string;
+  };
 }
 
 /* ── Defaults ─────────────────────────────────────────────────── */
