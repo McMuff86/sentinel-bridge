@@ -1,5 +1,12 @@
 import type { EngineKind, TurnUsage } from '../types.js';
 
+export interface LoopConfig {
+  maxIterations: number;
+  continueCondition?: string;
+  convergenceKey?: string;
+  convergenceThreshold?: number;
+}
+
 export interface WorkflowStepDefinition {
   id: string;
   sessionName: string;
@@ -8,6 +15,8 @@ export interface WorkflowStepDefinition {
   dependsOn?: string[];
   engine?: EngineKind;
   model?: string;
+  loop?: LoopConfig;
+  condition?: string;
 }
 
 export interface WorkflowDefinition {
@@ -16,6 +25,7 @@ export interface WorkflowDefinition {
   description?: string;
   workspace: string;
   steps: WorkflowStepDefinition[];
+  mode?: 'dag' | 'loop';
 }
 
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -29,6 +39,7 @@ export interface WorkflowStepState {
   startedAt?: string;
   completedAt?: string;
   turnUsage?: TurnUsage;
+  iteration?: number;
 }
 
 export type WorkflowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';

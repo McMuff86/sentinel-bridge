@@ -15,6 +15,9 @@ export interface UsageLogEntry {
   subscriptionCovered: boolean;
   durationMs?: number;
   error?: string;
+  outcome?: 'success' | 'failure' | 'partial';
+  qualityScore?: number;
+  taskCategory?: string;
 }
 
 export interface UsageLogInput {
@@ -28,6 +31,9 @@ export interface UsageLogInput {
   subscriptionCovered: boolean;
   durationMs?: number;
   error?: string;
+  outcome?: 'success' | 'failure' | 'partial';
+  qualityScore?: number;
+  taskCategory?: string;
 }
 
 export interface UsageTrackerOptions {
@@ -70,6 +76,15 @@ export interface SubscriptionSavingsSummary {
   coveredEntryCount: number;
   uncoveredEntryCount: number;
   byEngine: Record<EngineKind, number>;
+}
+
+export interface OutcomeSummary {
+  engine: EngineKind;
+  category: string;
+  successes: number;
+  failures: number;
+  partials: number;
+  avgQuality: number | null;
 }
 
 const DEFAULT_USAGE_LOG_PATH = join(
@@ -192,6 +207,44 @@ export class UsageTracker {
       uncoveredEntryCount,
       byEngine,
     };
+  }
+
+  async getOutcomesByEngineAndCategory(
+    engine?: EngineKind,
+    category?: string,
+  ): Promise<OutcomeSummary[]> {
+    const entries = await this.loadEntries((entry) => {
+      if (engine && entry.engine !== engine) return false;
+      if (category && entry.taskCategory !== category) return false;
+      return entry.outcome != null;
+    });
+
+    const buckets = new Map<string, { engine: string; category: string; successes: number; failures: number; partials: number; totalQuality: number; qualityCount: number }>();
+
+    for (const entry of entries) {
+      const key = `${entry.engine}:${entry.taskCategory ?? '__none__'}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { engine: entry.engine, category: entry.taskCategory ?? '__none__', successes: 0, failures: 0, partials: 0, totalQuality: 0, qualityCount: 0 };
+        buckets.set(key, bucket);
+      }
+      if (entry.outcome === 'success') bucket.successes++;
+      else if (entry.outcome === 'failure') bucket.failures++;
+      else if (entry.outcome === 'partial') bucket.partials++;
+      if (entry.qualityScore != null) {
+        bucket.totalQuality += entry.qualityScore;
+        bucket.qualityCount++;
+      }
+    }
+
+    return Array.from(buckets.values()).map(b => ({
+      engine: b.engine as EngineKind,
+      category: b.category,
+      successes: b.successes,
+      failures: b.failures,
+      partials: b.partials,
+      avgQuality: b.qualityCount > 0 ? b.totalQuality / b.qualityCount : null,
+    }));
   }
 
   private async loadEntries(
@@ -334,6 +387,9 @@ function normalizeUsageLogEntry(
       'Usage log entry durationMs',
     ),
     error: normalizeOptionalString(entry.error),
+    outcome: normalizeOptionalOutcome(entry.outcome),
+    qualityScore: normalizeOptionalQualityScore(entry.qualityScore),
+    taskCategory: normalizeOptionalString(entry.taskCategory),
   };
 }
 
@@ -377,6 +433,9 @@ function parseStoredUsageLogEntry(
       `Usage log line ${lineNumber} durationMs`,
     ),
     error: normalizeOptionalString(value.error),
+    outcome: normalizeOptionalOutcome(value.outcome),
+    qualityScore: normalizeOptionalQualityScore(value.qualityScore),
+    taskCategory: normalizeOptionalString(value.taskCategory),
   };
 }
 
@@ -564,6 +623,20 @@ function normalizeOptionalString(value: unknown): string | undefined {
 
   const trimmedValue = value.trim();
   return trimmedValue.length > 0 ? trimmedValue : undefined;
+}
+
+function normalizeOptionalOutcome(value: unknown): 'success' | 'failure' | 'partial' | undefined {
+  if (value == null) return undefined;
+  if (value === 'success' || value === 'failure' || value === 'partial') return value;
+  throw new Error('outcome must be "success", "failure", or "partial".');
+}
+
+function normalizeOptionalQualityScore(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error('qualityScore must be a number between 0 and 1.');
+  }
+  return value;
 }
 
 function requireNonEmptyString(value: unknown, context: string): string {

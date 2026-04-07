@@ -84,3 +84,98 @@ export function createFanOutFanInWorkflow(
 
   return { id, name, workspace, steps: [...parallelSteps, aggregatorStep] };
 }
+
+/* ── Autoresearch Template ───────────────────────────────────── */
+
+export interface AutoresearchConfig {
+  id: string;
+  name: string;
+  workspace: string;
+  objective: string;
+  maxIterations?: number;
+  parallelExperiments?: number;
+  researcherEngine?: EngineKind;
+  implementerEngine?: EngineKind;
+  reviewerEngine?: EngineKind;
+  analystEngine?: EngineKind;
+}
+
+/**
+ * Creates an autoresearch workflow: plan → implement[0..N] → review → analyze (loop).
+ *
+ * The analyst step has a loop config with `continueCondition='CONTINUE'` so it
+ * can iteratively refine its synthesis up to `maxIterations` times. Each
+ * iteration the analyst sees accumulated context from the blackboard.
+ *
+ * When `parallelExperiments > 1`, multiple implement steps run in parallel
+ * and the review step depends on all of them.
+ */
+export function createAutoresearchWorkflow(config: AutoresearchConfig): WorkflowDefinition {
+  const maxIterations = config.maxIterations ?? 5;
+  const parallelExperiments = config.parallelExperiments ?? 1;
+
+  const steps: WorkflowStepDefinition[] = [];
+
+  // Step 1: Plan — researcher generates hypotheses and experiment plan
+  steps.push({
+    id: 'plan',
+    sessionName: `${config.id}-plan`,
+    role: 'researcher',
+    engine: config.researcherEngine,
+    task:
+      `Research objective: ${config.objective}\n\n` +
+      'Generate hypotheses and design an experiment plan to investigate this objective. ' +
+      'Structure your output with clear hypotheses, methodology, and expected outcomes.',
+  });
+
+  // Steps 2..N+1: Implement (experiments, optionally parallel)
+  const implementIds: string[] = [];
+  for (let i = 0; i < parallelExperiments; i++) {
+    const id = parallelExperiments === 1 ? 'implement' : `implement-${i}`;
+    implementIds.push(id);
+    steps.push({
+      id,
+      sessionName: `${config.id}-${id}`,
+      role: 'implementer',
+      engine: config.implementerEngine,
+      task: 'Execute the experiment plan from the research phase. Implement thoroughly and report results with data.',
+      dependsOn: ['plan'],
+    });
+  }
+
+  // Step N+2: Review
+  steps.push({
+    id: 'review',
+    sessionName: `${config.id}-review`,
+    role: 'reviewer',
+    engine: config.reviewerEngine,
+    task: 'Review the experiment results. Assess methodology, validity, completeness, and identify gaps or issues.',
+    dependsOn: implementIds,
+  });
+
+  // Step N+3: Analyze (with loop)
+  steps.push({
+    id: 'analyze',
+    sessionName: `${config.id}-analyze`,
+    role: 'analyst',
+    engine: config.analystEngine,
+    task:
+      'Evaluate the research findings and review feedback. ' +
+      'Determine if the research objective has been adequately addressed.\n\n' +
+      'If more analysis or refinement is needed, output CONTINUE on its own line.\n' +
+      'If the research is complete and findings are sufficient, output DONE on its own line followed by a final synthesis.',
+    dependsOn: ['review'],
+    loop: {
+      maxIterations,
+      continueCondition: 'CONTINUE',
+    },
+  });
+
+  return {
+    id: config.id,
+    name: config.name,
+    description: `Autoresearch workflow: ${config.objective}`,
+    workspace: config.workspace,
+    steps,
+  };
+}

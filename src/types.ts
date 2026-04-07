@@ -20,6 +20,8 @@ export type SessionAction = 'start' | 'send' | 'compact' | 'stop' | 'rehydrate';
 
 export type EngineKind = 'claude' | 'codex' | 'grok' | 'ollama';
 
+export type BuiltInEngineKind = EngineKind;
+
 export type ModelRouteSource = 'explicit' | 'alias' | 'default';
 
 export interface ModelPricing {

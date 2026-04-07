@@ -1,4 +1,6 @@
 import { createEngine } from './engines/create-engine.js';
+import type { IEngineFactory } from './engines/engine-contract.js';
+import { EngineRegistry } from './engines/engine-registry.js';
 import { EngineError } from './errors.js';
 import {
   emptyTokenUsage,
@@ -21,6 +23,10 @@ import { HealthChecker } from './orchestration/health-check.js';
 import type { HealthCheckResult } from './orchestration/health-check.js';
 import { SessionQueue } from './orchestration/session-queue.js';
 import type { QueuePriority, QueueSnapshot } from './orchestration/session-queue.js';
+import { AdaptiveRouter } from './orchestration/adaptive-router.js';
+import type { RoutingStats, RoutingStrategy } from './orchestration/adaptive-router.js';
+import { RoutingStatsStore } from './orchestration/routing-stats-store.js';
+import { classifyTask } from './orchestration/task-classifier.js';
 import { expandFallbackChain } from './routing/expand-fallback-chain.js';
 import {
   appendRoutingAttempt,
@@ -93,6 +99,9 @@ export class SessionManager {
   readonly circuitBreaker: CircuitBreaker;
   readonly healthChecker: HealthChecker;
   readonly sessionQueue: SessionQueue;
+  readonly adaptiveRouter: AdaptiveRouter;
+  private readonly routingStatsStore: RoutingStatsStore;
+  readonly registry: EngineRegistry;
   readonly log: StructuredLogger;
   private cleanupTimer: {
     unref?: () => void;
@@ -100,12 +109,20 @@ export class SessionManager {
 
   constructor(config: SentinelBridgeConfig = {}, externalLogger?: ExternalLogger) {
     this.config = config;
+    this.registry = new EngineRegistry();
     this.roles = new RoleRegistry(this.roleStore.list());
     this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
     this.healthChecker = new HealthChecker(config.healthCheck, this.circuitBreaker);
     this.sessionQueue = new SessionQueue(config.queue);
     this.workflows = new WorkflowEngine();
     this.log = new StructuredLogger(externalLogger);
+    this.routingStatsStore = new RoutingStatsStore();
+    this.adaptiveRouter = new AdaptiveRouter();
+    // Bootstrap from persisted stats
+    const persistedStats = this.routingStatsStore.load();
+    if (persistedStats.length > 0) {
+      this.adaptiveRouter.importStats(persistedStats);
+    }
 
     const cleanupIntervalMs =
       config.cleanupIntervalMs ?? DEFAULT_CLEANUP_INTERVAL_MS;
@@ -119,6 +136,10 @@ export class SessionManager {
 
       this.cleanupTimer.unref?.();
     }
+  }
+
+  registerEngine(factory: IEngineFactory): void {
+    this.registry.register(factory);
   }
 
   async startSession(options: SessionStartOptions): Promise<SessionInfo> {
@@ -291,6 +312,11 @@ export class SessionManager {
       this.emit('message_failed', name, record.session.engine, {
         error: errMsg,
       });
+      // Record failure for adaptive routing
+      try {
+        const category = classifyTask(message).primary;
+        this.adaptiveRouter.recordOutcome(record.session.engine, category, false);
+      } catch { /* non-fatal */ }
       throw error;
     }
 
@@ -309,6 +335,12 @@ export class SessionManager {
     const tokensIn = Math.max(0, session.tokenCount.input - prevTokens.input);
     const tokensOut = Math.max(0, session.tokenCount.output - prevTokens.output);
     const cachedTokens = Math.max(0, session.tokenCount.cachedInput - prevTokens.cachedInput);
+
+    // Record success for adaptive routing
+    try {
+      const category = classifyTask(message).primary;
+      this.adaptiveRouter.recordOutcome(record.session.engine, category, true);
+    } catch { /* non-fatal */ }
 
     return {
       name,
@@ -1027,6 +1059,27 @@ export class SessionManager {
   resetCircuit(engine: EngineKind): void {
     this.circuitBreaker.reset(engine);
     this.log.info('orchestration', `Circuit breaker reset for ${engine}`, { engine });
+  }
+
+  /* ── Adaptive routing operations ─────────────────────────────── */
+
+  persistRoutingStats(): void {
+    try {
+      this.routingStatsStore.save(this.adaptiveRouter.exportStats());
+    } catch { /* non-fatal */ }
+  }
+
+  getAdaptiveRoutingStats(engine?: EngineKind, category?: string): RoutingStats[] {
+    return this.adaptiveRouter.getStats(engine, category);
+  }
+
+  setRoutingStrategy(strategy: RoutingStrategy): void {
+    this.adaptiveRouter.strategy = strategy;
+    this.log.info('routing', `Routing strategy set to "${strategy}"`, {});
+  }
+
+  getRoutingStrategy(): RoutingStrategy {
+    return this.adaptiveRouter.strategy;
   }
 
   /* ── Workflow operations ────────────────────────────────────── */

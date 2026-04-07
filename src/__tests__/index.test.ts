@@ -14,7 +14,7 @@ describe('activate', () => {
 
     activate(mockApi);
 
-    expect(registered).toHaveLength(33);
+    expect(registered).toHaveLength(35);
     expect(registered).toContain('sb_session_start');
     expect(registered).toContain('sb_session_send');
     expect(registered).toContain('sb_session_stop');
@@ -44,6 +44,8 @@ describe('activate', () => {
     expect(registered).toContain('sb_workflow_list');
     expect(registered).toContain('sb_workflow_template');
     expect(registered).toContain('sb_route_task');
+    expect(registered).toContain('sb_routing_stats');
+    expect(registered).toContain('sb_routing_config');
     expect(registered).toContain('sb_queue_status');
     expect(registered).toContain('sb_health_check');
     expect(registered).toContain('sb_circuit_status');

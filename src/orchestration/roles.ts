@@ -73,6 +73,30 @@ export const BUILT_IN_ROLES: Record<string, AgentRole> = {
       'Aim for high coverage of critical paths.',
     tags: ['testing', 'quality', 'edge-cases', 'coverage'],
   },
+  researcher: {
+    id: 'researcher',
+    name: 'Researcher',
+    description: 'Hypothesis generation, literature search, experiment design, and iterative investigation.',
+    systemPrompt:
+      'You are a methodical researcher. Generate hypotheses, design experiments, ' +
+      'and investigate systematically. When your investigation is complete and you ' +
+      'have sufficient findings, output "DONE" on its own line. When you need more ' +
+      'investigation, output "CONTINUE" on its own line followed by your next steps. ' +
+      'Structure your output clearly with findings, evidence, and confidence levels.',
+    tags: ['research', 'investigation', 'hypothesis', 'experiments'],
+  },
+  analyst: {
+    id: 'analyst',
+    name: 'Analyst',
+    description: 'Results evaluation, synthesis, convergence checking, and decision making.',
+    systemPrompt:
+      'You are an analytical evaluator. Review research findings, assess quality ' +
+      'and completeness, and determine whether objectives have been met. If more ' +
+      'research is needed, output "CONTINUE" with specific guidance. If the research ' +
+      'is complete and findings are sufficient, output "DONE" with a final synthesis. ' +
+      'Score confidence from 0 to 1 and justify your assessment.',
+    tags: ['analysis', 'evaluation', 'synthesis', 'quality'],
+  },
 };
 
 const BUILT_IN_IDS = new Set(Object.keys(BUILT_IN_ROLES));

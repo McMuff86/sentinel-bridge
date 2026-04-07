@@ -6,6 +6,7 @@
  */
 
 import { SessionManager } from '../session-manager.js';
+import type { RoutingStrategy } from '../orchestration/adaptive-router.js';
 import type { EngineKind } from '../types.js';
 import type { McpTool, McpToolHandler } from './server.js';
 
@@ -181,6 +182,32 @@ export function buildMcpTools(manager: SessionManager): McpToolRegistration[] {
     };
   });
 
+  add('sb_routing_stats', 'Show adaptive routing statistics (Thompson Sampling Beta parameters per engine:category).', {
+    type: 'object',
+    properties: {
+      engine: { type: 'string', enum: ['claude', 'codex', 'grok', 'ollama'] },
+      category: { type: 'string' },
+    },
+  }, async (params) => {
+    const stats = manager.getAdaptiveRoutingStats(
+      params.engine as EngineKind | undefined,
+      params.category as string | undefined,
+    );
+    return { ok: true, count: stats.length, stats };
+  });
+
+  add('sb_routing_config', 'Get or set the adaptive routing strategy.', {
+    type: 'object',
+    properties: {
+      strategy: { type: 'string', enum: ['thompson', 'ema', 'blended', 'static'], description: 'Set routing strategy. Omit to just read current.' },
+    },
+  }, async (params) => {
+    if (params.strategy) {
+      manager.setRoutingStrategy(params.strategy as RoutingStrategy);
+    }
+    return { ok: true, strategy: manager.getRoutingStrategy() };
+  });
+
   // ── Context (Blackboard) ─────────────────────────────────────
 
   add('sb_context_set', 'Set a value in shared workspace context.', {
@@ -334,22 +361,37 @@ export function buildMcpTools(manager: SessionManager): McpToolRegistration[] {
   add('sb_workflow_template', 'Generate a workflow from a template pattern.', {
     type: 'object',
     properties: {
-      pattern: { type: 'string', enum: ['pipeline', 'fan-out-fan-in'] },
+      pattern: { type: 'string', enum: ['pipeline', 'fan-out-fan-in', 'autoresearch'] },
       id: { type: 'string' }, name: { type: 'string' }, workspace: { type: 'string' },
       steps: { type: 'array', items: { type: 'object' } },
+      objective: { type: 'string', description: 'Research objective (for autoresearch pattern)' },
+      maxIterations: { type: 'number', description: 'Max analysis iterations (for autoresearch, default 5)' },
+      parallelExperiments: { type: 'number', description: 'Number of parallel experiments (for autoresearch, default 1)' },
     },
-    required: ['pattern', 'id', 'name', 'workspace', 'steps'],
+    required: ['pattern', 'id', 'name', 'workspace'],
   }, async (params) => {
-    const { createPipelineWorkflow, createFanOutFanInWorkflow } = await import('../orchestration/workflow-templates.js');
+    const { createPipelineWorkflow, createFanOutFanInWorkflow, createAutoresearchWorkflow } = await import('../orchestration/workflow-templates.js');
     const pattern = params.pattern as string;
-    const steps = params.steps as any[];
     let definition;
-    if (pattern === 'pipeline') {
-      definition = createPipelineWorkflow(params.id as string, params.name as string, params.workspace as string, steps);
+    if (pattern === 'autoresearch') {
+      const objective = (params.objective as string) ?? (params.steps as any)?.[0]?.task ?? 'Research objective not specified';
+      definition = createAutoresearchWorkflow({
+        id: params.id as string,
+        name: params.name as string,
+        workspace: params.workspace as string,
+        objective,
+        maxIterations: params.maxIterations as number | undefined,
+        parallelExperiments: params.parallelExperiments as number | undefined,
+      });
     } else {
-      const fanOut = steps.slice(0, -1);
-      const fanIn = steps[steps.length - 1];
-      definition = createFanOutFanInWorkflow(params.id as string, params.name as string, params.workspace as string, fanOut, fanIn);
+      const steps = params.steps as any[];
+      if (pattern === 'pipeline') {
+        definition = createPipelineWorkflow(params.id as string, params.name as string, params.workspace as string, steps);
+      } else {
+        const fanOut = steps.slice(0, -1);
+        const fanIn = steps[steps.length - 1];
+        definition = createFanOutFanInWorkflow(params.id as string, params.name as string, params.workspace as string, fanOut, fanIn);
+      }
     }
     return { ok: true, definition };
   });

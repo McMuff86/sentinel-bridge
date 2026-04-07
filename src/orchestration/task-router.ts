@@ -3,6 +3,7 @@ import { classifyTask } from './task-classifier.js';
 import type { TaskCategory, TaskClassification } from './task-classifier.js';
 import { getEngineCostTier } from './cost-tiers.js';
 import type { CostTier } from './cost-tiers.js';
+import type { AdaptiveRouter } from './adaptive-router.js';
 
 export interface EngineAvailability {
   engine: EngineKind;
@@ -25,6 +26,7 @@ export interface TaskRoutingResult {
   reasoning: string;
   alternatives: TaskRoutingAlternative[];
   costTier: CostTier;
+  method: 'thompson' | 'static';
 }
 
 interface EngineStrength {
@@ -186,10 +188,55 @@ export function routeTask(
   description: string,
   getAvailability: (engine: EngineKind) => EngineAvailability,
   prefer?: RoutingPreference,
+  adaptiveRouter?: AdaptiveRouter,
 ): TaskRoutingResult {
   const classification = classifyTask(description);
 
-  // Score all engines
+  // Try adaptive routing first
+  if (adaptiveRouter) {
+    const availableEngines = ENGINE_STRENGTHS
+      .filter(s => {
+        const a = getAvailability(s.engine);
+        return a.available && a.healthy;
+      })
+      .map(s => s.engine);
+
+    const adaptive = adaptiveRouter.selectEngine(classification.primary, availableEngines);
+    if (adaptive) {
+      const strength = ENGINE_STRENGTHS.find(s => s.engine === adaptive.engine)!;
+
+      // Build alternatives from static scoring for the remaining engines
+      const scored = ENGINE_STRENGTHS
+        .filter(s => s.engine !== adaptive.engine)
+        .map(s => ({
+          strength: s,
+          score: scoreEngine(s, classification.primary, prefer),
+          availability: getAvailability(s.engine),
+        }))
+        .filter(e => e.availability.available && e.availability.healthy)
+        .sort((a, b) => b.score - a.score);
+
+      const alternatives: TaskRoutingAlternative[] = scored.map(e => ({
+        engine: e.strength.engine,
+        model: e.strength.defaultModel,
+        reasoning: reasoningForCategory(classification.primary, e.strength.engine),
+        estimatedCostTier: getEngineCostTier(e.strength.engine, e.strength.engine === 'claude'),
+      }));
+
+      return {
+        classification,
+        recommendedEngine: adaptive.engine,
+        recommendedModel: strength.defaultModel,
+        confidence: 'high',
+        reasoning: `Thompson Sampling selected ${adaptive.engine} (confidence: ${(adaptive.confidence * 100).toFixed(1)}%)`,
+        alternatives,
+        costTier: getEngineCostTier(adaptive.engine, adaptive.engine === 'claude'),
+        method: 'thompson',
+      };
+    }
+  }
+
+  // Fall through to static scoring
   const scored = ENGINE_STRENGTHS
     .map(strength => ({
       strength,
@@ -209,6 +256,7 @@ export function routeTask(
       reasoning: 'No engines are currently available. Claude recommended as default.',
       alternatives: [],
       costTier: 'high',
+      method: 'static',
     };
   }
 
@@ -228,5 +276,6 @@ export function routeTask(
     reasoning: reasoningForCategory(classification.primary, best.strength.engine),
     alternatives,
     costTier: getEngineCostTier(best.strength.engine, best.strength.engine === 'claude'),
+    method: 'static',
   };
 }

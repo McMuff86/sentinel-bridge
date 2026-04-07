@@ -1,4 +1,5 @@
 import type { SessionManager } from '../session-manager.js';
+import { evaluateLoopCondition } from './loop-evaluator.js';
 import { WorkflowStore } from './workflow-store.js';
 import type {
   WorkflowDefinition,
@@ -86,9 +87,27 @@ export function validateWorkflow(definition: WorkflowDefinition): void {
     }
   }
 
-  const cycle = detectCycle(definition.steps);
-  if (cycle) {
-    throw new Error(`Workflow contains a cycle: ${cycle.join(' → ')}.`);
+  if (definition.mode === 'loop') {
+    // Loop mode: allow cycles but require at least one step in the cycle
+    // to have a loop config with maxIterations as a guard
+    const cycle = detectCycle(definition.steps);
+    if (cycle) {
+      const hasLoopGuard = cycle.some(stepId => {
+        const step = definition.steps.find(s => s.id === stepId);
+        return step?.loop?.maxIterations != null && step.loop.maxIterations > 0;
+      });
+      if (!hasLoopGuard) {
+        throw new Error(
+          `Loop workflow cycle [${cycle.join(' → ')}] must have at least one step with loop.maxIterations configured.`,
+        );
+      }
+    }
+  } else {
+    // DAG mode (default): reject cycles
+    const cycle = detectCycle(definition.steps);
+    if (cycle) {
+      throw new Error(`Workflow contains a cycle: ${cycle.join(' → ')}.`);
+    }
   }
 }
 
@@ -390,6 +409,56 @@ export class WorkflowEngine {
       stepState.turnUsage = result.turnUsage;
       stepState.completedAt = new Date().toISOString();
       state.updatedAt = new Date().toISOString();
+
+      // After step completion, check if this step has a loop config
+      if (step.loop) {
+        const iteration = (stepState.iteration ?? 0) + 1;
+        stepState.iteration = iteration;
+
+        // Build evaluation context
+        const blackboard: Record<string, unknown> = {};
+        try {
+          // Try to get blackboard values from context store if available
+          // This is best-effort — blackboard is only used for convergence checks
+        } catch { /* ignore */ }
+
+        const shouldContinue = evaluateLoopCondition(step.loop, {
+          output: stepState.output ?? '',
+          iteration,
+          blackboard,
+        });
+
+        if (shouldContinue) {
+          // Reset this step and its downstream dependents to pending
+          stepState.status = 'pending';
+          stepState.output = undefined;
+          stepState.error = undefined;
+          stepState.startedAt = undefined;
+          stepState.completedAt = undefined;
+          stepState.turnUsage = undefined;
+          // Keep iteration count
+
+          // Reset downstream steps that depend on this step
+          for (const s of definition.steps) {
+            if ((s.dependsOn ?? []).includes(step.id)) {
+              const downstream = state.steps[s.id];
+              if (downstream && downstream.status === 'completed') {
+                downstream.status = 'pending';
+                downstream.output = undefined;
+                downstream.error = undefined;
+                downstream.startedAt = undefined;
+                downstream.completedAt = undefined;
+                downstream.turnUsage = undefined;
+              }
+            }
+          }
+
+          state.updatedAt = new Date().toISOString();
+          this.checkpoint(state);
+          return; // Don't checkpoint again below
+        }
+      }
+
       this.checkpoint(state);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);

@@ -269,6 +269,239 @@ describe('UsageTracker', () => {
     });
   });
 
+  describe('Outcome Signal', () => {
+    it('should persist outcome fields when logging a call', async () => {
+      const { tracker, logFilePath } = await createTracker();
+
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:00:00.000Z',
+        sessionName: 'alpha',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'success',
+        qualityScore: 0.95,
+        taskCategory: 'code-generation',
+      });
+
+      const fs = await loadFsPromises();
+      const contents = await fs.readFile(logFilePath, 'utf8');
+      const parsed = JSON.parse(contents.trim());
+
+      expect(parsed.outcome).toBe('success');
+      expect(parsed.qualityScore).toBe(0.95);
+      expect(parsed.taskCategory).toBe('code-generation');
+    });
+
+    it('should work without outcome fields (backwards compat)', async () => {
+      const { tracker, logFilePath } = await createTracker();
+
+      const entry = await tracker.logCall({
+        timestamp: '2026-04-04T10:00:00.000Z',
+        sessionName: 'alpha',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+      });
+
+      expect(entry.outcome).toBeUndefined();
+      expect(entry.qualityScore).toBeUndefined();
+      expect(entry.taskCategory).toBeUndefined();
+
+      const fs = await loadFsPromises();
+      const contents = await fs.readFile(logFilePath, 'utf8');
+      const parsed = JSON.parse(contents.trim());
+
+      expect(parsed.outcome).toBeUndefined();
+      expect(parsed.qualityScore).toBeUndefined();
+      expect(parsed.taskCategory).toBeUndefined();
+    });
+
+    it('should throw on invalid outcome value', async () => {
+      const { tracker } = await createTracker();
+
+      await expect(
+        tracker.logCall({
+          timestamp: '2026-04-04T10:00:00.000Z',
+          sessionName: 'alpha',
+          engine: 'claude',
+          model: 'claude-opus-4-6',
+          action: 'send',
+          subscriptionCovered: true,
+          outcome: 'maybe' as 'success',
+        }),
+      ).rejects.toThrow('outcome must be "success", "failure", or "partial".');
+    });
+
+    it('should throw on invalid qualityScore (out of range)', async () => {
+      const { tracker } = await createTracker();
+
+      await expect(
+        tracker.logCall({
+          timestamp: '2026-04-04T10:00:00.000Z',
+          sessionName: 'alpha',
+          engine: 'claude',
+          model: 'claude-opus-4-6',
+          action: 'send',
+          subscriptionCovered: true,
+          qualityScore: 1.5,
+        }),
+      ).rejects.toThrow('qualityScore must be a number between 0 and 1.');
+
+      await expect(
+        tracker.logCall({
+          timestamp: '2026-04-04T10:00:00.000Z',
+          sessionName: 'alpha',
+          engine: 'claude',
+          model: 'claude-opus-4-6',
+          action: 'send',
+          subscriptionCovered: true,
+          qualityScore: -0.1,
+        }),
+      ).rejects.toThrow('qualityScore must be a number between 0 and 1.');
+    });
+
+    it('should return aggregated outcomes from getOutcomesByEngineAndCategory', async () => {
+      const { tracker } = await createTracker();
+
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:00:00.000Z',
+        sessionName: 'a',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'success',
+        qualityScore: 0.9,
+        taskCategory: 'code-generation',
+      });
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:01:00.000Z',
+        sessionName: 'a',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'failure',
+        qualityScore: 0.2,
+        taskCategory: 'code-generation',
+      });
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:02:00.000Z',
+        sessionName: 'a',
+        engine: 'codex',
+        model: 'gpt-5.4',
+        action: 'send',
+        subscriptionCovered: false,
+        outcome: 'success',
+        qualityScore: 0.8,
+        taskCategory: 'summarization',
+      });
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:03:00.000Z',
+        sessionName: 'a',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'partial',
+        taskCategory: 'code-generation',
+      });
+
+      const results = await tracker.getOutcomesByEngineAndCategory();
+
+      expect(results).toHaveLength(2);
+
+      const claudeCodeGen = results.find(
+        r => r.engine === 'claude' && r.category === 'code-generation',
+      );
+      expect(claudeCodeGen).toEqual({
+        engine: 'claude',
+        category: 'code-generation',
+        successes: 1,
+        failures: 1,
+        partials: 1,
+        avgQuality: 0.55,
+      });
+
+      const codexSummarization = results.find(
+        r => r.engine === 'codex' && r.category === 'summarization',
+      );
+      expect(codexSummarization).toEqual({
+        engine: 'codex',
+        category: 'summarization',
+        successes: 1,
+        failures: 0,
+        partials: 0,
+        avgQuality: 0.8,
+      });
+    });
+
+    it('should filter by engine in getOutcomesByEngineAndCategory', async () => {
+      const { tracker } = await createTracker();
+
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:00:00.000Z',
+        sessionName: 'a',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'success',
+        taskCategory: 'code-generation',
+      });
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:01:00.000Z',
+        sessionName: 'a',
+        engine: 'codex',
+        model: 'gpt-5.4',
+        action: 'send',
+        subscriptionCovered: false,
+        outcome: 'success',
+        taskCategory: 'code-generation',
+      });
+
+      const results = await tracker.getOutcomesByEngineAndCategory('claude');
+
+      expect(results).toHaveLength(1);
+      expect(results[0]!.engine).toBe('claude');
+      expect(results[0]!.successes).toBe(1);
+    });
+
+    it('should filter by category in getOutcomesByEngineAndCategory', async () => {
+      const { tracker } = await createTracker();
+
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:00:00.000Z',
+        sessionName: 'a',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'success',
+        taskCategory: 'code-generation',
+      });
+      await tracker.logCall({
+        timestamp: '2026-04-04T10:01:00.000Z',
+        sessionName: 'a',
+        engine: 'claude',
+        model: 'claude-opus-4-6',
+        action: 'send',
+        subscriptionCovered: true,
+        outcome: 'failure',
+        taskCategory: 'summarization',
+      });
+
+      const results = await tracker.getOutcomesByEngineAndCategory(undefined, 'summarization');
+
+      expect(results).toHaveLength(1);
+      expect(results[0]!.category).toBe('summarization');
+      expect(results[0]!.failures).toBe(1);
+    });
+  });
+
   it('should log and summarize ollama engine entries', async () => {
     const { tracker } = await createTracker(
       () => new Date('2026-04-04T15:30:00.000Z'),

@@ -21,6 +21,7 @@ export { PLUGIN_META, DEFAULT_CONFIG } from './plugin.js';
 export type { SentinelBridgeConfig, EngineConfig } from './plugin.js';
 export { SessionManager } from './session-manager.js';
 export type {
+  BuiltInEngineKind,
   CircuitBreakerConfig,
   CostReport,
   EngineKind,
@@ -38,11 +39,16 @@ export type {
   SessionSummary,
   TurnUsage,
 } from './types.js';
+export type { IEngineFactory } from './engines/engine-contract.js';
+export { EngineRegistry } from './engines/engine-registry.js';
 export type {
+  LoopConfig,
   WorkflowDefinition,
   WorkflowState,
   WorkflowStepDefinition,
 } from './orchestration/workflow-types.js';
+export { evaluateLoopCondition } from './orchestration/loop-evaluator.js';
+export type { LoopEvaluationContext } from './orchestration/loop-evaluator.js';
 export type { SessionEvent, SessionEventType } from './sessions/session-events.js';
 export { SessionEventStore } from './sessions/session-events.js';
 export { SessionMutex } from './sessions/session-mutex.js';
@@ -61,6 +67,12 @@ export type { ContextEntry, ContextStoreData } from './orchestration/context-sto
 export { ContextStore } from './orchestration/context-store.js';
 export type { QueuePriority, QueueSnapshot } from './orchestration/session-queue.js';
 export { getStateDir } from './state-dir.js';
+export type { OutcomeSummary } from './tracking.js';
+export { AdaptiveRouter } from './orchestration/adaptive-router.js';
+export type { BetaParams, RoutingStats, AdaptiveRoutingResult, RoutingStrategy } from './orchestration/adaptive-router.js';
+export { RoutingStatsStore } from './orchestration/routing-stats-store.js';
+export type { AutoresearchConfig } from './orchestration/workflow-templates.js';
+export { createAutoresearchWorkflow } from './orchestration/workflow-templates.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok' | 'ollama';
 
@@ -690,6 +702,72 @@ function buildTools(): ToolDef[] {
       },
     },
 
+    {
+      name: 'sb_routing_stats',
+      description:
+        'Show adaptive routing statistics (Thompson Sampling Beta parameters per engine:category). ' +
+        'Filter by engine and/or category. Returns alpha/beta params and sample counts.',
+      parameters: {
+        type: 'object',
+        properties: {
+          engine: {
+            type: 'string',
+            enum: ENGINE_KINDS,
+            description: 'Filter by engine',
+          },
+          category: {
+            type: 'string',
+            description: 'Filter by task category',
+          },
+        },
+      },
+      handler: async (params, ctx) => {
+        const engine = readEngineKind(params, 'engine');
+        const category = readOptionalString(params, 'category');
+        const stats = ctx.manager.getAdaptiveRoutingStats(
+          engine ?? undefined,
+          category,
+        );
+
+        return {
+          ok: true,
+          count: stats.length,
+          stats,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
+    {
+      name: 'sb_routing_config',
+      description:
+        'Get or set the adaptive routing strategy. ' +
+        'Strategies: thompson (default, exploration via Beta sampling), ema (exploitation via exponential moving average), ' +
+        'blended (70% EMA + 30% Thompson), static (disable adaptive routing).',
+      parameters: {
+        type: 'object',
+        properties: {
+          strategy: {
+            type: 'string',
+            enum: ['thompson', 'ema', 'blended', 'static'],
+            description: 'Set routing strategy. Omit to just read current.',
+          },
+        },
+      },
+      handler: async (params, ctx) => {
+        const strategy = readOptionalString(params, 'strategy');
+        if (strategy) {
+          ctx.manager.setRoutingStrategy(
+            strategy as 'thompson' | 'ema' | 'blended' | 'static',
+          );
+        }
+
+        return {
+          ok: true,
+          strategy: ctx.manager.getRoutingStrategy(),
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
     /* ── Workflow tools ──────────────────────────────────────────── */
 
     {
@@ -833,13 +911,14 @@ function buildTools(): ToolDef[] {
       name: 'sb_workflow_template',
       description:
         'Generate a WorkflowDefinition from a template pattern without executing it. ' +
-        'Supported patterns: "pipeline" (linear chain) and "fan-out-fan-in" (parallel + aggregator).',
+        'Supported patterns: "pipeline" (linear chain), "fan-out-fan-in" (parallel + aggregator), ' +
+        'and "autoresearch" (iterative research loop).',
       parameters: {
         type: 'object',
         properties: {
           pattern: {
             type: 'string',
-            enum: ['pipeline', 'fan-out-fan-in'],
+            enum: ['pipeline', 'fan-out-fan-in', 'autoresearch'],
             description: 'Workflow pattern',
           },
           id: { type: 'string', description: 'Workflow id' },
@@ -859,38 +938,56 @@ function buildTools(): ToolDef[] {
               },
               required: ['id', 'sessionName', 'task'],
             },
-            description: 'Steps for the workflow. For fan-out-fan-in, the last step is the aggregator.',
+            description: 'Steps for the workflow. For fan-out-fan-in, the last step is the aggregator. Not required for autoresearch.',
           },
+          objective: { type: 'string', description: 'Research objective (for autoresearch pattern)' },
+          maxIterations: { type: 'number', description: 'Max analysis iterations (for autoresearch, default 5)' },
+          parallelExperiments: { type: 'number', description: 'Number of parallel experiments (for autoresearch, default 1)' },
         },
-        required: ['pattern', 'id', 'name', 'workspace', 'steps'],
+        required: ['pattern', 'id', 'name', 'workspace'],
       },
       handler: async (params, _ctx) => {
-        const { createPipelineWorkflow, createFanOutFanInWorkflow } = await import('./orchestration/workflow-templates.js');
+        const { createPipelineWorkflow, createFanOutFanInWorkflow, createAutoresearchWorkflow } = await import('./orchestration/workflow-templates.js');
         const pattern = readRequiredString(params, 'pattern');
         const id = readRequiredString(params, 'id');
         const name = readRequiredString(params, 'name');
         const workspace = readRequiredString(params, 'workspace');
-        const steps = params['steps'] as Array<{
-          id: string;
-          sessionName: string;
-          task: string;
-          role?: string;
-          engine?: import('./types.js').EngineKind;
-          model?: string;
-        }>;
 
         let definition;
-        if (pattern === 'pipeline') {
-          definition = createPipelineWorkflow(id, name, workspace, steps);
-        } else if (pattern === 'fan-out-fan-in') {
-          if (steps.length < 2) {
-            throw new Error('Fan-out-fan-in requires at least 2 steps (fan-out + aggregator).');
-          }
-          const fanOut = steps.slice(0, -1);
-          const fanIn = steps[steps.length - 1];
-          definition = createFanOutFanInWorkflow(id, name, workspace, fanOut, fanIn);
+        if (pattern === 'autoresearch') {
+          const objective = (params['objective'] as string) ?? (params['steps'] as any)?.[0]?.task ?? 'Research objective not specified';
+          definition = createAutoresearchWorkflow({
+            id,
+            name,
+            workspace,
+            objective,
+            maxIterations: params['maxIterations'] as number | undefined,
+            parallelExperiments: params['parallelExperiments'] as number | undefined,
+          });
         } else {
-          throw new Error(`Unknown pattern "${pattern}". Use "pipeline" or "fan-out-fan-in".`);
+          const steps = params['steps'] as Array<{
+            id: string;
+            sessionName: string;
+            task: string;
+            role?: string;
+            engine?: import('./types.js').EngineKind;
+            model?: string;
+          }>;
+          if (!steps || steps.length === 0) {
+            throw new Error(`Pattern "${pattern}" requires steps.`);
+          }
+          if (pattern === 'pipeline') {
+            definition = createPipelineWorkflow(id, name, workspace, steps);
+          } else if (pattern === 'fan-out-fan-in') {
+            if (steps.length < 2) {
+              throw new Error('Fan-out-fan-in requires at least 2 steps (fan-out + aggregator).');
+            }
+            const fanOut = steps.slice(0, -1);
+            const fanIn = steps[steps.length - 1];
+            definition = createFanOutFanInWorkflow(id, name, workspace, fanOut, fanIn);
+          } else {
+            throw new Error(`Unknown pattern "${pattern}". Use "pipeline", "fan-out-fan-in", or "autoresearch".`);
+          }
         }
 
         return {
