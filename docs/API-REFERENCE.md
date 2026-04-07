@@ -444,7 +444,30 @@ Manually reset a circuit breaker to closed state, re-enabling the engine.
 
 **Returns:** `{ ok, engine, circuit }`.
 
-**Note:** `sb_engine_status` also includes circuit breaker state in its response.
+**Note:** `sb_engine_status` also includes circuit breaker state and health check results in its response.
+
+---
+
+## Health Check Tools
+
+### `sb_health_check`
+
+Run health probes on engines. CLI engines are checked via PATH lookup, HTTP engines via API ping. Also starts periodic background checks (default: every 2 minutes) if not already running.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `engine` | no | Specific engine to check (omit for all) |
+
+**Returns:** `{ ok, results[] }` — each result has `engine`, `healthy` (boolean), `latencyMs`, `checkedAt` (ISO), `error` (if unhealthy).
+
+**Probing strategy:**
+- **Claude/Codex:** Checks if CLI binary exists on PATH
+- **Grok:** HTTP GET to `/models` endpoint (needs `grokApiKey` in config)
+- **Ollama:** HTTP GET to root URL (default: `http://localhost:11434`)
+
+**Circuit breaker integration:** Healthy probes record success (helps close half-open circuits). Unhealthy probes do NOT record failure — health checks inform, they don't penalize.
+
+**Note:** `sb_engine_status` also includes the latest health check result in its response.
 
 ---
 

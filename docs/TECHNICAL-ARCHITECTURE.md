@@ -163,6 +163,15 @@ The `src/orchestration/` directory contains the multi-agent orchestration featur
 - `broadcastMessage(from, message, exclude?)` sends to all active sessions via `Promise.allSettled`
 - Relay events tracked on both source and target session timelines
 
+### HealthChecker (`health-check.ts`)
+- Periodic probes for all 4 engines (configurable interval, default 2 min)
+- CLI engines: PATH lookup for binary availability
+- Grok: HTTP GET `/models` with API key
+- Ollama: HTTP ping to root URL
+- Results include `healthy`, `latencyMs`, `checkedAt`, `error`
+- Circuit breaker integration: healthy probes record success (helps close half-open), unhealthy probes do NOT penalize
+- Exposed via `sb_health_check` tool and enriched `sb_engine_status` response
+
 ### CircuitBreaker (`circuit-breaker.ts`)
 - Per-engine failure tracking with three states: `closed` (normal), `open` (blocking), `half-open` (probing)
 - Configurable threshold (default: 5 consecutive failures to open), cooldown (default: 60s), and half-open success threshold (default: 1)
