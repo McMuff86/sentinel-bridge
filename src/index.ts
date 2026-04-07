@@ -71,6 +71,11 @@ export type { OutcomeSummary } from './tracking.js';
 export { AdaptiveRouter } from './orchestration/adaptive-router.js';
 export type { BetaParams, RoutingStats, AdaptiveRoutingResult, RoutingStrategy } from './orchestration/adaptive-router.js';
 export { RoutingStatsStore } from './orchestration/routing-stats-store.js';
+export { EmbeddingClient, cosineSimilarity } from './orchestration/embedding-client.js';
+export type { EmbeddingResult } from './orchestration/embedding-client.js';
+export { KnnRouter } from './orchestration/knn-router.js';
+export type { EmbeddingRecord, KnnRoutingResult } from './orchestration/knn-router.js';
+export { EmbeddingStore } from './orchestration/embedding-store.js';
 export type { AutoresearchConfig } from './orchestration/workflow-templates.js';
 export { createAutoresearchWorkflow } from './orchestration/workflow-templates.js';
 
@@ -742,13 +747,14 @@ function buildTools(): ToolDef[] {
       description:
         'Get or set the adaptive routing strategy. ' +
         'Strategies: thompson (default, exploration via Beta sampling), ema (exploitation via exponential moving average), ' +
-        'blended (70% EMA + 30% Thompson), static (disable adaptive routing).',
+        'blended (70% EMA + 30% Thompson), knn (embedding-based K-nearest-neighbor voting), ' +
+        'ensemble (weighted Thompson + EMA + KNN), static (disable adaptive routing).',
       parameters: {
         type: 'object',
         properties: {
           strategy: {
             type: 'string',
-            enum: ['thompson', 'ema', 'blended', 'static'],
+            enum: ['thompson', 'ema', 'blended', 'knn', 'ensemble', 'static'],
             description: 'Set routing strategy. Omit to just read current.',
           },
         },
@@ -757,7 +763,7 @@ function buildTools(): ToolDef[] {
         const strategy = readOptionalString(params, 'strategy');
         if (strategy) {
           ctx.manager.setRoutingStrategy(
-            strategy as 'thompson' | 'ema' | 'blended' | 'static',
+            strategy as 'thompson' | 'ema' | 'blended' | 'knn' | 'ensemble' | 'static',
           );
         }
 

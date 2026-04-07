@@ -1,5 +1,6 @@
 import type { EngineKind } from '../types.js';
 import type { TaskCategory } from './task-classifier.js';
+import type { KnnRouter } from './knn-router.js';
 
 export interface BetaParams {
   alpha: number;  // success count + 1 (prior)
@@ -15,12 +16,12 @@ export interface RoutingStats {
   lastUpdated: string;
 }
 
-export type RoutingStrategy = 'thompson' | 'ema' | 'blended' | 'static';
+export type RoutingStrategy = 'thompson' | 'ema' | 'blended' | 'knn' | 'ensemble' | 'static';
 
 export interface AdaptiveRoutingResult {
   engine: EngineKind;
   confidence: number;     // 0-1, sampled value
-  method: 'thompson' | 'ema' | 'blended' | 'static';
+  method: 'thompson' | 'ema' | 'blended' | 'knn' | 'ensemble' | 'static';
 }
 
 /**
@@ -35,11 +36,15 @@ export class AdaptiveRouter {
   private readonly minSamples: number;
   private _strategy: RoutingStrategy = 'thompson';
   private readonly emaAlpha: number;
+  private _knnRouter: KnnRouter | null = null;
 
   constructor(minSamples = 5, emaAlpha = 0.3) {
     this.minSamples = minSamples;
     this.emaAlpha = emaAlpha;
   }
+
+  setKnnRouter(router: KnnRouter): void { this._knnRouter = router; }
+  get knnRouter(): KnnRouter | null { return this._knnRouter; }
 
   get strategy(): RoutingStrategy { return this._strategy; }
   set strategy(s: RoutingStrategy) { this._strategy = s; }
@@ -66,6 +71,8 @@ export class AdaptiveRouter {
 
     switch (this._strategy) {
       case 'thompson':
+      case 'knn':      // KNN/ensemble need async — fall back to thompson in sync context
+      case 'ensemble':
         return this.selectByThompson(candidates as Array<{ engine: EngineKind; stats: RoutingStats }>);
       case 'ema':
         return this.selectByEma(candidates as Array<{ engine: EngineKind; stats: RoutingStats }>);
@@ -74,6 +81,70 @@ export class AdaptiveRouter {
       default:
         return null;
     }
+  }
+
+  /**
+   * Async engine selection — required for KNN and ensemble strategies
+   * which need embedding lookups. Falls back to sync selectEngine for
+   * strategies that don't require embeddings.
+   */
+  async selectEngineAsync(
+    category: TaskCategory,
+    available: EngineKind[],
+    query?: string,
+  ): Promise<AdaptiveRoutingResult | null> {
+    // For non-KNN strategies, delegate to sync method
+    if (this._strategy !== 'knn' && this._strategy !== 'ensemble') {
+      return this.selectEngine(category, available);
+    }
+
+    if (!query || !this._knnRouter || !this._knnRouter.available) {
+      // Fallback to sync (thompson) when KNN is unavailable
+      return this.selectEngine(category, available);
+    }
+
+    if (this._strategy === 'knn') {
+      const knnResult = await this._knnRouter.selectEngine(query, available);
+      if (knnResult) {
+        return { engine: knnResult.engine, confidence: knnResult.confidence, method: 'knn' };
+      }
+      // Fallback to Thompson
+      return this.selectEngine(category, available);
+    }
+
+    if (this._strategy === 'ensemble') {
+      // Weighted combination: Thompson + EMA + KNN
+      const candidates = available
+        .map(engine => ({
+          engine,
+          stats: this.stats.get(this.key(engine, category)),
+        }))
+        .filter(c => c.stats && c.stats.sampleCount >= this.minSamples);
+
+      if (candidates.length < 2) return null;
+
+      const knnResult = await this._knnRouter.selectEngine(query, available);
+
+      let bestEngine = candidates[0]!.engine;
+      let bestScore = -1;
+
+      for (const { engine, stats } of candidates) {
+        const thompsonSample = betaSample(stats!.params.alpha, stats!.params.beta);
+        let score = 0.3 * thompsonSample + 0.4 * stats!.ema;
+        // KNN bonus: if KNN picked this engine, add 0.3 weight
+        if (knnResult && knnResult.engine === engine) {
+          score += 0.3 * knnResult.confidence;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestEngine = engine;
+        }
+      }
+
+      return { engine: bestEngine, confidence: bestScore, method: 'ensemble' };
+    }
+
+    return null;
   }
 
   private selectByThompson(candidates: Array<{ engine: EngineKind; stats: RoutingStats }>): AdaptiveRoutingResult {

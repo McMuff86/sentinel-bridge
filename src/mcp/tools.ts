@@ -199,7 +199,7 @@ export function buildMcpTools(manager: SessionManager): McpToolRegistration[] {
   add('sb_routing_config', 'Get or set the adaptive routing strategy.', {
     type: 'object',
     properties: {
-      strategy: { type: 'string', enum: ['thompson', 'ema', 'blended', 'static'], description: 'Set routing strategy. Omit to just read current.' },
+      strategy: { type: 'string', enum: ['thompson', 'ema', 'blended', 'knn', 'ensemble', 'static'], description: 'Set routing strategy. Omit to just read current.' },
     },
   }, async (params) => {
     if (params.strategy) {

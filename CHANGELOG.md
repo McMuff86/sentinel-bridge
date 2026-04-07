@@ -4,6 +4,68 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Added — Adaptive Routing (Phases 4-5, 8)
+- **Thompson Sampling** — `AdaptiveRouter` with Beta distributions (Marsaglia-Tsang
+  Gamma sampling, Box-Muller normal). Per engine:category pair, learns which engine
+  performs best. Minimum 5 samples before activating, static fallback otherwise.
+- **EMA Scoring** — Exponential Moving Average strategy (alpha=0.3) for exploitation-
+  focused routing. Blended strategy: 70% EMA + 30% Thompson for balanced explore/exploit.
+- **KNN Embedding Routing** — Ollama nomic-embed-text embeddings, cosine similarity,
+  K-nearest-neighbor vote from successful historical queries. Ensemble strategy:
+  weighted 0.3 Thompson + 0.4 EMA + 0.3 KNN. Graceful degradation when Ollama unavailable.
+- **Runtime strategy switching** — `sb_routing_config` MCP tool to change strategy
+  (thompson/ema/blended/knn/ensemble/static) at runtime.
+- **`sb_routing_stats`** — MCP tool showing Beta parameters, EMA scores, sample counts
+  per engine:category.
+- **Persistence** — `RoutingStatsStore` (JSON) and `EmbeddingStore` (JSONL, 10k record cap).
+- **Tool count:** 33 → 35 tools.
+
+### Added — Engine Plugin System (Phase 2)
+- **`IEngineFactory`** interface — formal contract for engine plugins with
+  `engineKind`, `displayName`, `transport`, `privacyLevel`, `create()`, optional
+  `healthCheck()`.
+- **`EngineRegistry`** — register/create/has/get/list. 4 built-in factories
+  auto-registered (Claude, Codex, Grok, Ollama).
+- **`SessionManager.registerEngine(factory)`** — runtime engine registration.
+- **`create-engine.ts`** refactored to thin wrapper over default registry.
+- **`BuiltInEngineKind`** type alias added (non-breaking).
+
+### Added — Outcome Signal (Phase 3)
+- **Outcome tracking** — `UsageLogEntry` gains optional `outcome` ('success'/'failure'/
+  'partial'), `qualityScore` (0-1), and `taskCategory` fields.
+- **`getOutcomesByEngineAndCategory()`** — query method aggregating outcomes per
+  engine:category bucket with average quality scores.
+
+### Added — Loop Workflows (Phase 6)
+- **`LoopConfig`** — `maxIterations`, `continueCondition` (string match),
+  `convergenceKey` + `convergenceThreshold` (numeric convergence).
+- **`mode: 'loop'`** on `WorkflowDefinition` — allows cyclic graphs with mandatory
+  loop guards. Default `'dag'` preserves existing cycle rejection.
+- **Loop evaluator** — `evaluateLoopCondition()` with string-match and convergence
+  strategies. Steps reset to pending with downstream cascade on loop continuation.
+- **`WorkflowStepState.iteration`** — tracks loop iteration count.
+
+### Added — Autoresearch Template (Phase 7)
+- **`researcher` and `analyst` built-in roles** — structured CONTINUE/DONE output
+  signals for iterative research patterns.
+- **`createAutoresearchWorkflow(config)`** — generates plan→implement[0..N]→review→
+  analyze(loop) pipeline. Configurable `maxIterations`, `parallelExperiments`,
+  per-role engine overrides.
+- **`sb_workflow_template` pattern: 'autoresearch'** — MCP tool support with
+  `objective`, `maxIterations`, `parallelExperiments` parameters.
+
+### Added — Mission-Control Integration (Phase 9)
+- **Routing endpoints** — `GET /api/sentinel/routing/stats`,
+  `GET|POST /api/sentinel/routing/config` for adaptive routing management.
+- **Autoresearch endpoints** — `POST /api/sentinel/autoresearch/start`,
+  `GET /api/sentinel/autoresearch/status` for research workflow lifecycle.
+- **RoutingWidget** — dashboard component with strategy selector and per-engine
+  success rate visualisation.
+- **AutoresearchPanel** — research objective input, iteration config, workflow
+  status monitoring with live refresh.
+- **sentinel-api.ts** — typed client functions for all new endpoints.
+- **bridgeStore.ts** — Zustand actions for routing strategy and stats.
+
 ### Changed — Mission-Control BridgeView Migration
 - **BridgeView** now powered entirely by sentinel-bridge API instead of
   legacy `bridge.js` routes. Engine health, sessions, and cost data all
