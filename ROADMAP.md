@@ -1,6 +1,6 @@
 # Roadmap — sentinel-bridge
 
-Current state: 28 tools, 4 engines, multi-agent orchestration with workflows, roles, shared context, relay, and content-based routing. 341 tests, zero runtime dependencies.
+Current state: 30 tools, 4 engines, multi-agent orchestration with workflows, roles, shared context, relay, content-based routing, and circuit breaker. 354 tests, zero runtime dependencies.
 
 ---
 
@@ -11,11 +11,11 @@ Current state: 28 tools, 4 engines, multi-agent orchestration with workflows, ro
 - Checkpoint step outputs to disk between steps
 - `sb_workflow_resume` tool to pick up where a workflow left off
 
-### Circuit Breaker
-- Track consecutive failures per engine
-- Automatically disable engine after N failures (configurable threshold)
-- Re-enable after cooldown period or manual reset
-- Expose circuit state via `sb_engine_status`
+### ~~Circuit Breaker~~ (done)
+- ~~Track consecutive failures per engine~~
+- ~~Automatically disable engine after N failures (configurable threshold)~~
+- ~~Re-enable after cooldown period or manual reset~~
+- ~~Expose circuit state via `sb_engine_status`, `sb_circuit_status`, `sb_circuit_reset`~~
 
 ### Health Checks
 - Periodic engine reachability probes (not just on start)

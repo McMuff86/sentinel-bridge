@@ -56,6 +56,12 @@ export interface SentinelBridgeConfig {
   sessionTTLMs?: number;
   /** Cleanup sweep cadence in milliseconds */
   cleanupIntervalMs?: number;
+  /** Circuit breaker settings for automatic engine disabling after repeated failures */
+  circuitBreaker?: {
+    failureThreshold?: number;
+    cooldownMs?: number;
+    halfOpenSuccessThreshold?: number;
+  };
 }
 
 /* ── Defaults ─────────────────────────────────────────────────── */

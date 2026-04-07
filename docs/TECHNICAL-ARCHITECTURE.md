@@ -163,6 +163,15 @@ The `src/orchestration/` directory contains the multi-agent orchestration featur
 - `broadcastMessage(from, message, exclude?)` sends to all active sessions via `Promise.allSettled`
 - Relay events tracked on both source and target session timelines
 
+### CircuitBreaker (`circuit-breaker.ts`)
+- Per-engine failure tracking with three states: `closed` (normal), `open` (blocking), `half-open` (probing)
+- Configurable threshold (default: 5 consecutive failures to open), cooldown (default: 60s), and half-open success threshold (default: 1)
+- Integrated into the fallback chain: engines with open circuits are skipped entirely
+- Auto-transition: open → half-open after cooldown, allowing a probe request
+- Half-open → closed on success (circuit recovered), half-open → open on failure (still broken)
+- Manual reset via `sb_circuit_reset` for operator intervention
+- Statistics: tracks `totalFailures`, `totalSuccesses`, `consecutiveFailures`, `lastFailureAt`, `openedAt`
+
 ### TaskRouter (`task-router.ts`) + TaskClassifier (`task-classifier.ts`)
 - Heuristic keyword/pattern classifier: `code_generation`, `code_review`, `reasoning`, `fast_task`, `creative`, `local_private`, `general`
 - Engine scoring based on capability strengths (code, reasoning, speed, privacy)

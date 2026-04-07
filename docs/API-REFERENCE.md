@@ -404,4 +404,30 @@ The classifier detects: `code_generation`, `code_review`, `reasoning`, `fast_tas
 
 ---
 
+---
+
+## Circuit Breaker Tools
+
+### `sb_circuit_status`
+
+Show circuit breaker state for all engines. Engines with open circuits are automatically skipped during session start fallback.
+
+**Returns:** `{ ok, circuits[] }` — each circuit has `engine`, `state` (`closed`/`open`/`half-open`), `consecutiveFailures`, `lastFailureAt`, `openedAt`, `totalFailures`, `totalSuccesses`.
+
+---
+
+### `sb_circuit_reset`
+
+Manually reset a circuit breaker to closed state, re-enabling the engine.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `engine` | yes | Engine to reset (`claude`/`codex`/`grok`/`ollama`) |
+
+**Returns:** `{ ok, engine, circuit }`.
+
+**Note:** `sb_engine_status` also includes circuit breaker state in its response.
+
+---
+
 Further architecture notes: [TECHNICAL-ARCHITECTURE.md](./TECHNICAL-ARCHITECTURE.md). Contributor onboarding and branch notes: [CONTEXT-HANDOFF.md](./CONTEXT-HANDOFF.md).

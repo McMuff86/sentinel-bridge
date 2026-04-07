@@ -116,7 +116,9 @@
       "sb_workflow_cancel",
       "sb_workflow_list",
       "sb_workflow_template",
-      "sb_route_task"
+      "sb_route_task",
+      "sb_circuit_status",
+      "sb_circuit_reset"
     ],
     "exports": {
       "activate": "activate"

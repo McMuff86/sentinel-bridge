@@ -4,6 +4,18 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Added — Circuit Breaker
+- **Per-engine circuit breaker** — tracks consecutive failures per engine with
+  three states: closed (normal), open (blocking), half-open (probing).
+  Configurable `failureThreshold` (default: 5), `cooldownMs` (default: 60s),
+  `halfOpenSuccessThreshold` (default: 1).
+- **Automatic engine skipping** — engines with open circuits are skipped during
+  fallback chain execution, preventing wasted retry attempts.
+- **Manual reset** — `sb_circuit_reset` tool to re-enable a tripped engine.
+- **Observability** — `sb_circuit_status` shows all circuit states;
+  `sb_engine_status` now includes circuit state in response.
+- **Tool count:** 28 → 30 tools.
+
 ### Added — Multi-Agent Orchestration Layer
 - **Shared context (blackboard)** — workspace-scoped key-value store for
   cross-session data sharing. 4 new tools: `sb_context_set`, `sb_context_get`,

@@ -15,6 +15,8 @@ import { RoleStore } from './orchestration/role-store.js';
 import type { RelayResult, BroadcastResult, BroadcastTargetResult } from './orchestration/relay.js';
 import { WorkflowEngine } from './orchestration/workflow-engine.js';
 import type { WorkflowDefinition, WorkflowState } from './orchestration/workflow-types.js';
+import { CircuitBreaker } from './orchestration/circuit-breaker.js';
+import type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
 import { expandFallbackChain } from './routing/expand-fallback-chain.js';
 import {
   appendRoutingAttempt,
@@ -84,6 +86,7 @@ export class SessionManager {
   readonly roles: RoleRegistry;
   private readonly roleStore = new RoleStore();
   readonly workflows = new WorkflowEngine();
+  readonly circuitBreaker: CircuitBreaker;
   readonly log: StructuredLogger;
   private cleanupTimer: {
     unref?: () => void;
@@ -92,6 +95,7 @@ export class SessionManager {
   constructor(config: SentinelBridgeConfig = {}, externalLogger?: ExternalLogger) {
     this.config = config;
     this.roles = new RoleRegistry(this.roleStore.list());
+    this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
     this.log = new StructuredLogger(externalLogger);
 
     const cleanupIntervalMs =
@@ -148,12 +152,28 @@ export class SessionManager {
       const route =
         index === 0 ? primaryRoute : this.resolveDefaultRoute(engine);
 
+      // Circuit breaker: skip engines with open circuit
+      if (!this.circuitBreaker.isAllowed(engine)) {
+        this.log.warn('fallback', `Circuit breaker OPEN for ${engine}, skipping`, {
+          session: options.name,
+          engine,
+          meta: { circuitState: 'open' },
+        });
+        appendRoutingAttempt(
+          routingTrace,
+          toRoutingAttempt({ engine, model: route.model, error: new Error('circuit breaker open') }),
+        );
+        continue;
+      }
+
       try {
         await this.start(options.name, engine, {
           cwd: options.cwd,
           model: route.model,
           resumeSessionId: index === 0 ? options.resumeSessionId : undefined,
         });
+
+        this.circuitBreaker.recordSuccess(engine);
 
         const record = this.requireSession(options.name);
         record.routingTrace = appendRoutingAttempt(
@@ -198,12 +218,15 @@ export class SessionManager {
 
         return info;
       } catch (error) {
+        this.circuitBreaker.recordFailure(engine);
+
         const errMsg = error instanceof Error ? error.message : String(error);
         const errorCategory = error instanceof EngineError ? error.category : 'unknown';
+        const circuitState = this.circuitBreaker.getSnapshot(engine).state;
         this.log.warn('fallback', `Engine ${engine} failed for "${options.name}" [${errorCategory}]: ${errMsg}`, {
           session: options.name,
           engine,
-          meta: { attempt: index + 1, model: route.model, errorCategory },
+          meta: { attempt: index + 1, model: route.model, errorCategory, circuitState },
         });
         appendRoutingAttempt(
           routingTrace,
@@ -922,6 +945,21 @@ export class SessionManager {
       sessionName: name,
       ...extra,
     });
+  }
+
+  /* ── Circuit breaker operations ─────────────────────────────── */
+
+  getCircuitState(engine: EngineKind): CircuitSnapshot {
+    return this.circuitBreaker.getSnapshot(engine);
+  }
+
+  getAllCircuitStates(): CircuitSnapshot[] {
+    return this.circuitBreaker.getAllSnapshots();
+  }
+
+  resetCircuit(engine: EngineKind): void {
+    this.circuitBreaker.reset(engine);
+    this.log.info('orchestration', `Circuit breaker reset for ${engine}`, { engine });
   }
 
   /* ── Workflow operations ────────────────────────────────────── */

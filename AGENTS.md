@@ -72,7 +72,8 @@ sentinel-bridge/
 │   │   ├── workflow-templates.ts # Pipeline + fan-out/fan-in factories
 │   │   ├── task-classifier.ts    # Keyword/pattern task classification
 │   │   ├── task-router.ts        # Content-based engine recommendation
-│   │   └── cost-tiers.ts         # Engine cost ranking
+│   │   ├── cost-tiers.ts         # Engine cost ranking
+│   │   └── circuit-breaker.ts    # Per-engine circuit breaker (closed/open/half-open)
 │   ├── sessions/
 │   │   ├── session-store.ts      # JSON persistence (atomic writes)
 │   │   ├── session-events.ts     # JSONL event timeline per session
@@ -104,6 +105,7 @@ sentinel-bridge/
 │       ├── workflow-templates.test.ts
 │       ├── task-classifier.test.ts
 │       ├── task-router.test.ts
+│       ├── circuit-breaker.test.ts
 │       └── routing.test.ts
 └── dist/                         # Compiled output (gitignored)
 ```
@@ -111,7 +113,7 @@ sentinel-bridge/
 ## Testing Strategy
 
 - **Framework:** vitest (run via `npx vitest run`)
-- **Unit tests:** 341 tests across 25 test files in `src/__tests__/`
+- **Unit tests:** 354 tests across 26 test files in `src/__tests__/`
 - **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama, mock stores for orchestration
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually
@@ -161,6 +163,7 @@ docs: update architecture diagram
 6. **Error context.** Every thrown error includes engine name, session name, and original error.
 7. **Event logging.** Session lifecycle events are recorded via `SessionEventStore` (JSONL). Structured logs via `StructuredLogger`. No polling loops.
 8. **Idempotent stops.** Calling `stop()` on an already-stopped session is a no-op.
+9. **Documentation upkeep.** When a feature or task is completed, update the relevant documentation (README, API-REFERENCE, TECHNICAL-ARCHITECTURE, CHANGELOG, etc.) and mark the item as done in ROADMAP.md. Documentation is part of the deliverable, not an afterthought.
 
 ## Dependencies
 

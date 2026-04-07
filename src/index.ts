@@ -307,6 +307,7 @@ function buildTools(): ToolDef[] {
         return {
           ok: true,
           engine: getEngineDescriptor(engine, ctx.config),
+          circuit: ctx.manager.getCircuitState(engine),
         } satisfies ToolHandlerResponse;
       },
     },
@@ -539,6 +540,47 @@ function buildTools(): ToolDef[] {
         return {
           ok: true,
           workspace,
+        } satisfies ToolHandlerResponse;
+      },
+    },
+
+    /* ── Circuit breaker tools ─────────────────────────────────── */
+
+    {
+      name: 'sb_circuit_status',
+      description:
+        'Show circuit breaker state for all engines. Engines with open circuits ' +
+        'are automatically skipped during session start fallback.',
+      parameters: { type: 'object', properties: {} },
+      handler: async (_params, ctx) => {
+        return {
+          ok: true,
+          circuits: ctx.manager.getAllCircuitStates(),
+        } satisfies ToolHandlerResponse;
+      },
+    },
+    {
+      name: 'sb_circuit_reset',
+      description:
+        'Manually reset a circuit breaker to closed state, re-enabling the engine.',
+      parameters: {
+        type: 'object',
+        properties: {
+          engine: { type: 'string', enum: ENGINE_KINDS, description: 'Engine to reset' },
+        },
+        required: ['engine'],
+      },
+      handler: async (params, ctx) => {
+        const engine = readEngineKind(params, 'engine');
+        if (!engine) {
+          throw new Error('Engine is required.');
+        }
+        ctx.manager.resetCircuit(engine);
+
+        return {
+          ok: true,
+          engine,
+          circuit: ctx.manager.getCircuitState(engine),
         } satisfies ToolHandlerResponse;
       },
     },
@@ -1320,6 +1362,7 @@ function toSessionManagerConfig(
     defaultEngine: config.defaultEngine,
     defaultModel: config.defaultModel,
     defaultFallbackChain: config.defaultFallbackChain,
+    circuitBreaker: config.circuitBreaker,
     claude: normalizeEngineConfig(config.engines?.claude),
     codex: normalizeEngineConfig(config.engines?.codex),
     grok: normalizeEngineConfig(config.engines?.grok),

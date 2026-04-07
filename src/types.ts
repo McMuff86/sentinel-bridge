@@ -62,6 +62,15 @@ export interface EngineConfig {
   pricing?: Partial<ModelPricing>;
 }
 
+export interface CircuitBreakerConfig {
+  /** Number of consecutive failures before opening the circuit. Default: 5 */
+  failureThreshold?: number;
+  /** Milliseconds to wait before transitioning from open to half-open. Default: 60000 */
+  cooldownMs?: number;
+  /** Number of successes in half-open state to close the circuit. Default: 1 */
+  halfOpenSuccessThreshold?: number;
+}
+
 export interface SentinelBridgeConfig {
   ttlMs?: number;
   cleanupIntervalMs?: number;
@@ -74,6 +83,8 @@ export interface SentinelBridgeConfig {
    * Primary is always attempted first. Use [] to disable fallback retries.
    */
   defaultFallbackChain?: EngineKind[];
+  /** Circuit breaker settings for automatic engine disabling after repeated failures. */
+  circuitBreaker?: CircuitBreakerConfig;
   claude?: Partial<EngineConfig>;
   codex?: Partial<EngineConfig>;
   grok?: Partial<EngineConfig>;

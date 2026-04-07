@@ -63,7 +63,7 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 │  ┌─────────────────────────────────────────────────────────────┐  │
 │  │                      sentinel-bridge                         │  │
 │  │                                                              │  │
-│  │  Tools (28 sb_*)  →  SessionManager (mutex-locked)           │  │
+│  │  Tools (30 sb_*)  →  SessionManager (mutex-locked)           │  │
 │  │                       ├── Session #1 (role: architect)       │  │
 │  │                       ├── Session #2 (role: implementer)     │  │
 │  │                       └── ...                                │  │
@@ -114,7 +114,8 @@ Ensure **`claude login`** (or current Anthropic CLI auth) succeeded on the host.
 - **Persistence** — sessions survive plugin restarts via atomic JSON store writes; JSONL event timeline per session
 - **Structured logging** — JSON log entries with level, category, session context; integrates with OpenClaw's plugin logger
 - **Observability** — per-session status, routing decisions, token usage, cost tracking, and event timeline
-- **Plugin surface** — 28 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
+- **Circuit breaker** — per-engine failure tracking with automatic disabling (closed → open → half-open states), configurable threshold and cooldown, manual reset
+- **Plugin surface** — 30 `sb_*` tools covering session lifecycle, orchestration, routing, cost, and more
 - **Provider isolation** — keep CLI/API quirks inside engine adapters instead of leaking them upward
 
 ## Engines
@@ -216,7 +217,7 @@ The codebase is split into focused modules:
 - `src/tracking.ts` — usage tracking with JSONL logging
 - `src/plugin.ts` — plugin metadata, config types, defaults
 
-## Tools (28)
+## Tools (30)
 
 Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters):
 
@@ -242,6 +243,8 @@ Registered tools (see [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full pa
 | `sb_model_route` | Resolve model → engine |
 | `sb_cost_report` | Cost aggregation |
 | `sb_route_task` | Content-based routing: analyze task → recommend engine/model |
+| `sb_circuit_status` | Show circuit breaker state for all engines |
+| `sb_circuit_reset` | Manually reset a circuit breaker to re-enable an engine |
 
 ### Orchestration
 
