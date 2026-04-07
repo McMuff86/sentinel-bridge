@@ -100,8 +100,8 @@ export const DEFAULT_CONFIG: SentinelBridgeConfig = {
     },
     ollama: {
       baseUrl: 'http://localhost:11434/v1',
-      defaultModel: 'llama3.2',
-      enabled: false, // opt-in, needs running Ollama instance
+      defaultModel: 'gemma4',
+      enabled: true,
     },
   },
   defaultEngine: 'claude',

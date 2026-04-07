@@ -958,7 +958,7 @@ export class SessionManager {
       case 'grok':
         return 'grok-4-1-fast';
       case 'ollama':
-        return 'llama3.2';
+        return 'gemma4';
       default: {
         const exhaustiveCheck: never = engine;
         throw new Error(`Unsupported engine: ${exhaustiveCheck}`);

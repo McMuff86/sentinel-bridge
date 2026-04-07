@@ -40,8 +40,9 @@ export const MODEL_ALIASES: Record<EngineKind, Record<string, string>> = {
     'deepseek-r1': 'deepseek-r1',
     'qwen': 'qwen2.5-coder',
     'qwen2.5-coder': 'qwen2.5-coder',
-    'gemma': 'gemma3',
+    'gemma': 'gemma4',
     'gemma3': 'gemma3',
+    'gemma4': 'gemma4',
     'phi4': 'phi4',
   },
 };

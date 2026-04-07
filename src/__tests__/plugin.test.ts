@@ -24,11 +24,11 @@ describe('default config', () => {
     expect(DEFAULT_CONFIG.engines!.ollama).toBeDefined();
   });
 
-  it('claude and codex enabled by default, grok and ollama disabled', () => {
+  it('claude, codex, and ollama enabled by default, grok disabled', () => {
     expect(DEFAULT_CONFIG.engines!.claude!.enabled).toBe(true);
     expect(DEFAULT_CONFIG.engines!.codex!.enabled).toBe(true);
     expect(DEFAULT_CONFIG.engines!.grok!.enabled).toBe(false);
-    expect(DEFAULT_CONFIG.engines!.ollama!.enabled).toBe(false);
+    expect(DEFAULT_CONFIG.engines!.ollama!.enabled).toBe(true);
   });
 
   it('has sensible session limits', () => {
