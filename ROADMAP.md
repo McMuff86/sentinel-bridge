@@ -107,6 +107,22 @@ Current state: 31 tools, 4 engines, multi-agent orchestration with workflows (wi
 
 ---
 
+## Integration: Mission-Control (in progress)
+
+Sentinel-Bridge is now integrated into Mission-Control as a local dependency (`file:../sentinel-bridge`). The integration exposes all 31 tools as REST endpoints via `routes/sentinel.js`:
+
+- `GET /api/sentinel/status` — Bridge overview (sessions, circuits, workflows)
+- `POST /api/sentinel/session/start|send|stop|relay` — Session lifecycle
+- `GET /api/sentinel/engines` — Engine health + circuit breaker state
+- `POST /api/sentinel/workflow/start|resume|cancel` — Workflow orchestration
+- `POST /api/sentinel/route-task` — Content-based task routing
+- `GET /api/sentinel/roles` — Agent role listing
+- `POST /api/sentinel/context/set` — Shared context operations
+
+**Next:** Connect Factory UI to use `sb_workflow_start` for factory runs instead of raw CLI agent spawning.
+
+---
+
 ## Non-goals
 
 These are explicitly out of scope for sentinel-bridge:

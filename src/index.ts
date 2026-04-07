@@ -19,7 +19,9 @@ import { SessionManager } from './session-manager.js';
 
 export { PLUGIN_META, DEFAULT_CONFIG } from './plugin.js';
 export type { SentinelBridgeConfig, EngineConfig } from './plugin.js';
+export { SessionManager } from './session-manager.js';
 export type {
+  CircuitBreakerConfig,
   CostReport,
   EngineKind,
   EngineState,
@@ -36,6 +38,11 @@ export type {
   SessionSummary,
   TurnUsage,
 } from './types.js';
+export type {
+  WorkflowDefinition,
+  WorkflowState,
+  WorkflowStepDefinition,
+} from './orchestration/workflow-types.js';
 export type { SessionEvent, SessionEventType } from './sessions/session-events.js';
 export { SessionEventStore } from './sessions/session-events.js';
 export { SessionMutex } from './sessions/session-mutex.js';
@@ -43,6 +50,10 @@ export { StructuredLogger } from './logging.js';
 export type { LogLevel, LogCategory, LogEntry, ExternalLogger } from './logging.js';
 export { EngineError, toEngineError } from './errors.js';
 export type { ErrorCategory } from './errors.js';
+export type { AgentRole } from './orchestration/roles.js';
+export type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
+export type { TaskRoutingResult } from './orchestration/task-router.js';
+export { routeTask } from './orchestration/task-router.js';
 
 type EngineKind = 'claude' | 'codex' | 'grok' | 'ollama';
 
