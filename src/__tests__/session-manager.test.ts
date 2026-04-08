@@ -434,6 +434,59 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('full lifecycle smoke test', () => {
+    it('start → send → compact → stop → cost flows end to end', async () => {
+      const usageAfterSend = {
+        costUsd: 0.05,
+        tokenCount: { input: 50, output: 30, cachedInput: 5, total: 85 },
+      };
+      const usageAfterCompact = {
+        costUsd: 0.07,
+        tokenCount: { input: 80, output: 40, cachedInput: 10, total: 130 },
+      };
+
+      const manager = new SessionManager({
+        claude: { model: 'claude-opus-4-6' },
+      });
+
+      // Start
+      const session = await manager.startSession({ name: 'smoke' });
+      expect(session.status).toBe('active');
+      expect(session.engine).toBe('claude');
+
+      // Send
+      const record = (manager as any).sessions.get('smoke');
+      record.engineInstance.send = vi.fn().mockImplementationOnce(async () => {
+        hoisted.claudeUsageRef.current = usageAfterSend;
+        return 'response text';
+      });
+      const sendResult = await manager.sendMessage('smoke', 'test prompt');
+      expect(sendResult.output).toBe('response text');
+      expect(sendResult.session.turnCount).toBe(1);
+
+      // Compact
+      record.engineInstance.compact = vi.fn().mockImplementationOnce(async () => {
+        hoisted.claudeUsageRef.current = usageAfterCompact;
+        return 'compacted';
+      });
+      const compactResult = await manager.compactSession('smoke');
+      expect(compactResult.output).toBe('compacted');
+
+      // Cost report
+      const cost = manager.getCostReport();
+      expect(cost.totalUsd).toBeGreaterThanOrEqual(0);
+
+      // Stop removes session from memory + store
+      await manager.stopSession('smoke');
+      expect(manager.getSessionStatus('smoke')).toBeUndefined();
+      expect(manager.listSessions().find(s => s.name === 'smoke')).toBeUndefined();
+
+      // Restore
+      hoisted.claudeUsageRef.current = hoisted.idleUsage;
+      await manager.shutdown();
+    });
+  });
+
   describe('overview with session summaries', () => {
     it('should include per-session summaries in overview', async () => {
       const manager = new SessionManager({

@@ -87,11 +87,6 @@ export interface SentinelBridgeConfig {
   defaultFallbackChain?: EngineKind[];
   /** Circuit breaker settings for automatic engine disabling after repeated failures. */
   circuitBreaker?: CircuitBreakerConfig;
-  /** Session queue settings for backpressure when at max capacity. */
-  queue?: {
-    maxDepth?: number;
-    timeoutMs?: number;
-  };
   /** Health check settings for periodic engine probing. */
   healthCheck?: {
     intervalMs?: number;

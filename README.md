@@ -1,6 +1,6 @@
 # sentinel-bridge
 
-**Multi-engine LLM orchestration — route prompts across Claude, Codex, Grok, and Ollama with adaptive routing, DAG workflows, and 35 MCP tools.**
+**Multi-engine LLM orchestration — route prompts across Claude, Codex, Grok, and Ollama with adaptive routing, DAG workflows, and 34 MCP tools.**
 
 [![npm version](https://img.shields.io/npm/v/sentinel-bridge)](https://www.npmjs.com/package/sentinel-bridge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -33,7 +33,7 @@ npm run build
 claude mcp add sentinel-bridge -- node /path/to/sentinel-bridge/dist/mcp/index.js
 ```
 
-All 35 `sb_*` tools are now available as native tool calls inside Claude Code.
+All 34 `sb_*` tools are now available as native tool calls inside Claude Code.
 
 ### With Cursor / Windsurf
 
@@ -93,21 +93,20 @@ All engines look the same: start sessions, send messages, switch models, route r
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │                     sentinel-bridge                         │  │
 │  │                                                             │  │
-│  │  MCP Tools (35 sb_*)  →  SessionManager (mutex-locked)      │  │
+│  │  MCP Tools (34 sb_*)  →  SessionManager (mutex-locked)      │  │
 │  │                           ├── Session #1 (role: architect)  │  │
 │  │                           ├── Session #2 (role: researcher) │  │
 │  │                           └── ...                           │  │
 │  │                                                             │  │
 │  │  ┌── Orchestration Layer ─────────────────────────────────┐ │  │
 │  │  │  WorkflowEngine    AdaptiveRouter   ContextStore       │ │  │
-│  │  │  (DAG + loops)     (6 strategies)   (blackboard)       │ │  │
+│  │  │  (DAG execution)   (4 strategies)   (blackboard)       │ │  │
 │  │  │  TaskRouter         RoleRegistry    Relay (P2P)        │ │  │
 │  │  │  (heuristic)        (6 built-in)    ContextEvents      │ │  │
 │  │  └────────────────────────────────────────────────────────┘ │  │
 │  │                                                             │  │
 │  │  ┌── Adaptive Routing ────────────────────────────────────┐ │  │
-│  │  │  Thompson Sampling  ·  EMA  ·  Blended  ·  KNN        │ │  │
-│  │  │  Ensemble (0.3T + 0.4E + 0.3K)  ·  Static             │ │  │
+│  │  │  Thompson Sampling · EMA · Blended (70E/30T) · Static  │ │  │
 │  │  └────────────────────────────────────────────────────────┘ │  │
 │  │                                                             │  │
 │  │           ┌── IEngine / EngineRegistry ──────┐              │  │
@@ -122,18 +121,18 @@ All engines look the same: start sessions, send messages, switch models, route r
 
 ## Features
 
-### Adaptive Routing (6 strategies)
+### Adaptive Routing (4 strategies)
 
 sentinel-bridge learns which engine performs best for each task category:
 
 - **Thompson Sampling** — Bayesian exploration via Beta distributions
 - **EMA** — Exponential Moving Average for exploitation-focused routing
 - **Blended** — 70% EMA + 30% Thompson (balanced explore/exploit)
-- **KNN Embedding** — Ollama nomic-embed-text cosine similarity, K-nearest vote from history
-- **Ensemble** — Weighted 0.3 Thompson + 0.4 EMA + 0.3 KNN
 - **Static** — Heuristic task classification (fast/cheap/capable preferences)
 
 Switch strategies at runtime via `sb_routing_config`. View stats via `sb_routing_stats`.
+
+> **Experimental:** KNN embedding routing and ensemble strategy are available in `src/experimental/` but not yet wired into the core routing pipeline.
 
 ### Engine Plugin System
 
@@ -153,7 +152,7 @@ manager.registerEngine({
 
 ### Multi-Agent Orchestration
 
-- **Workflow DAG + Loops** — multi-step workflows with dependency resolution, parallel execution, loop iterations with convergence detection
+- **Workflow DAG** — multi-step workflows with dependency resolution, parallel execution, step-level loop iterations with convergence detection
 - **Autoresearch template** — plan → implement[0..N] → review → analyze(loop) pipeline for iterative research
 - **Shared context (blackboard)** — workspace-scoped key-value store for cross-session data
 - **Agent roles** — 6 built-in roles (Architect, Implementer, Reviewer, Tester, Researcher, Analyst) + custom roles
@@ -171,7 +170,6 @@ manager.registerEngine({
 
 - **Circuit breaker** — per-engine failure tracking (closed → open → half-open), auto-disable
 - **Health checks** — periodic engine probes with latency tracking
-- **Backpressure** — priority session queue when concurrency limit reached
 - **Concurrency safety** — per-session mutex
 - **Persistence** — atomic JSON stores, JSONL event timelines, routing stats
 - **Structured logging** — JSON entries with categories, integrates with host logger
@@ -234,7 +232,7 @@ _*Tracked for visibility but covered by subscription — actual cost is $0._
 
 Full reference: [docs/configuration.md](docs/configuration.md).
 
-## Tools (35)
+## Tools (34)
 
 See [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters.
 
@@ -264,7 +262,6 @@ See [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters.
 | `sb_circuit_status` | Circuit breaker state for all engines |
 | `sb_circuit_reset` | Reset a circuit breaker |
 | `sb_health_check` | Run health probes (latency, availability) |
-| `sb_queue_status` | Session queue depth and priority breakdown |
 | `sb_routing_stats` | Adaptive routing stats (Beta params, EMA scores) |
 | `sb_routing_config` | Get/set routing strategy at runtime |
 
@@ -281,7 +278,7 @@ See [docs/API-REFERENCE.md](docs/API-REFERENCE.md) for full parameters.
 | `sb_role_register` | Register a custom agent role |
 | `sb_session_relay` | Relay message between sessions |
 | `sb_session_broadcast` | Broadcast to all active sessions |
-| `sb_workflow_start` | Start a workflow (DAG or loop) |
+| `sb_workflow_start` | Start a DAG workflow |
 | `sb_workflow_status` | Workflow progress |
 | `sb_workflow_resume` | Resume interrupted workflow |
 | `sb_workflow_cancel` | Cancel running workflow |

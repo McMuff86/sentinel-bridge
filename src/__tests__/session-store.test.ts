@@ -105,4 +105,72 @@ describe('SessionStore', () => {
     expect(data.version).toBe(1);
     expect(Object.keys(data.sessions)).toHaveLength(0);
   });
+
+  it('survives rapid sequential upserts without data loss', () => {
+    const store = new SessionStore(storePath);
+    const count = 50;
+
+    for (let i = 0; i < count; i++) {
+      store.upsert(makeSession(`rapid-${i}`));
+    }
+
+    const all = store.list();
+    expect(all).toHaveLength(count);
+
+    for (let i = 0; i < count; i++) {
+      const session = store.get(`rapid-${i}`);
+      expect(session).toBeDefined();
+      expect(session!.name).toBe(`rapid-${i}`);
+    }
+
+    const raw = readFileSync(storePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    expect(Object.keys(parsed.sessions)).toHaveLength(count);
+  });
+
+  it('preserves existing sessions when upserting a new one', () => {
+    const store = new SessionStore(storePath);
+    store.upsert(makeSession('first'));
+    store.upsert(makeSession('second'));
+    store.upsert(makeSession('third'));
+
+    const first = store.get('first');
+    expect(first).toBeDefined();
+    expect(first!.name).toBe('first');
+
+    expect(store.list()).toHaveLength(3);
+  });
+
+  it('round-trips all SessionInfo fields through persist/load', () => {
+    const store = new SessionStore(storePath);
+    const session = makeSession('roundtrip');
+    session.costUsd = 1.234;
+    session.tokenCount = { input: 100, output: 50, cachedInput: 25, total: 175 };
+    session.turnCount = 7;
+    session.role = 'architect';
+    session.lastError = 'test error';
+
+    store.upsert(session);
+    const loaded = store.get('roundtrip')!;
+
+    expect(loaded.costUsd).toBe(1.234);
+    expect(loaded.tokenCount).toEqual({ input: 100, output: 50, cachedInput: 25, total: 175 });
+    expect(loaded.turnCount).toBe(7);
+    expect(loaded.role).toBe('architect');
+    expect(loaded.lastError).toBe('test error');
+    expect(loaded.engine).toBe('claude');
+    expect(loaded.model).toBe('claude-opus-4-6');
+  });
+
+  it('delete removes only the target session', () => {
+    const store = new SessionStore(storePath);
+    store.upsert(makeSession('keep'));
+    store.upsert(makeSession('remove'));
+
+    store.delete('remove');
+
+    expect(store.get('remove')).toBeUndefined();
+    expect(store.get('keep')).toBeDefined();
+    expect(store.list()).toHaveLength(1);
+  });
 });

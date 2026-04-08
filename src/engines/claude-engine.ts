@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 
 import type {
   EngineConfig,
@@ -8,7 +9,6 @@ import type {
   IEngine,
   ModelPricing,
 } from "../types.js";
-import { EngineError } from "../errors.js";
 import {
   buildCompactPrompt,
   emptyTokenUsage,
@@ -19,6 +19,18 @@ import {
   toOptionalNumber,
   toStringValue,
 } from "./shared.js";
+import { EngineError } from "../errors.js";
+import {
+  type JsonRecord,
+  parseJsonLine,
+  getNestedValue,
+  getJsonRecord,
+  chunkToString,
+  isJsonRecord,
+  createSpawnError,
+  createProcessError,
+  killProcessGracefully,
+} from "./cli-utils.js";
 
 type ClaudeUsageDelta = {
   input: number;
@@ -35,8 +47,6 @@ type ClaudeRunResult = {
   totalCostUsd?: number;
 };
 
-type JsonRecord = Record<string, unknown>;
-
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export class ClaudeEngine implements IEngine {
@@ -47,7 +57,7 @@ export class ClaudeEngine implements IEngine {
     costUsd: 0,
     tokenCount: emptyTokenUsage(),
   };
-  private activeProcess: any = null;
+  private activeProcess: ChildProcess | null = null;
   private sentAtLeastOnePrompt = false;
   private stoppingFlag = false;
 
@@ -71,10 +81,9 @@ export class ClaudeEngine implements IEngine {
     if (!this.config.model) {
       this.state = "error";
       this.usage.lastError = "Claude model is required.";
-      throw new Error(this.usage.lastError);
+      throw new EngineError(this.usage.lastError, 'unknown');
     }
 
-    // Validate that claude CLI is available
     const command = this.config.command ?? "claude";
     try {
       execFileSync(command, ["--version"], {
@@ -84,12 +93,12 @@ export class ClaudeEngine implements IEngine {
       });
     } catch (error) {
       this.state = "error";
-      const msg =
-        this.isJsonRecord(error) && error.code === "ENOENT"
-          ? `Claude CLI not found at '${command}'. Install claude and ensure it is on PATH.`
-          : `Claude CLI validation failed: ${error instanceof Error ? error.message : String(error)}`;
+      const isNotFound = isJsonRecord(error) && error.code === "ENOENT";
+      const msg = isNotFound
+        ? `Claude CLI not found at '${command}'. Install claude and ensure it is on PATH.`
+        : `Claude CLI validation failed: ${error instanceof Error ? error.message : String(error)}`;
       this.usage.lastError = msg;
-      throw new Error(msg);
+      throw new EngineError(msg, 'unavailable', { cause: error });
     }
 
     if (this.config.resumeSessionId) {
@@ -99,7 +108,7 @@ export class ClaudeEngine implements IEngine {
     this.state = "running";
   }
 
-  async send(message: string, _onChunk?: (chunk: string) => void): Promise<string> {
+  async send(message: string, onChunk?: (chunk: string) => void): Promise<string> {
     if (!message.trim()) {
       return "";
     }
@@ -109,13 +118,13 @@ export class ClaudeEngine implements IEngine {
     }
 
     if (this.activeProcess) {
-      throw new Error("Claude engine already has a request in flight.");
+      throw new EngineError("Claude engine already has a request in flight.", 'unknown');
     }
 
     this.state = "running";
 
     try {
-      const result = await this.runClaude(message);
+      const result = await this.runClaude(message, onChunk);
       const turnUsage = result.usage;
       const pricing = this.resolvePricing();
       const turnCost =
@@ -172,20 +181,7 @@ export class ClaudeEngine implements IEngine {
     if (this.activeProcess) {
       const processToStop = this.activeProcess;
       this.activeProcess = null;
-
-      processToStop.kill("SIGTERM");
-
-      await new Promise<void>((resolve) => {
-        const forceKillTimer = setTimeout(() => {
-          processToStop.kill("SIGKILL");
-          resolve();
-        }, 1_000);
-
-        processToStop.once("close", () => {
-          clearTimeout(forceKillTimer);
-          resolve();
-        });
-      });
+      await killProcessGracefully(processToStop);
     }
 
     this.state = "stopped";
@@ -209,7 +205,7 @@ export class ClaudeEngine implements IEngine {
     return this.sessionId;
   }
 
-  private async runClaude(message: string): Promise<ClaudeRunResult> {
+  private async runClaude(message: string, onChunk?: (chunk: string) => void): Promise<ClaudeRunResult> {
     const command = this.config.command ?? "claude";
     const args = this.buildArgs(message);
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -257,7 +253,7 @@ export class ClaudeEngine implements IEngine {
             continue;
           }
 
-          const event = this.parseJsonLine(line);
+          const event = parseJsonLine(line);
           if (!event) {
             continue;
           }
@@ -283,23 +279,26 @@ export class ClaudeEngine implements IEngine {
             }
           } else {
             streamText += extractedText.text;
+            if (onChunk) {
+              try { onChunk(extractedText.text); } catch { /* non-fatal */ }
+            }
           }
         }
       };
 
       child.stdout.on("data", (chunk: unknown) => {
-        stdoutBuffer += this.chunkToString(chunk);
+        stdoutBuffer += chunkToString(chunk);
         flushStdout();
       });
 
       child.stderr.on("data", (chunk: unknown) => {
-        stderrBuffer += this.chunkToString(chunk);
+        stderrBuffer += chunkToString(chunk);
       });
 
       child.once("error", (error: unknown) => {
         clearTimeout(timeoutHandle);
         this.activeProcess = null;
-        reject(this.createSpawnError(error));
+        reject(createSpawnError("Claude", error));
       });
 
       child.once("close", (code: number | null, signal: string | null) => {
@@ -325,13 +324,13 @@ export class ClaudeEngine implements IEngine {
 
         if (timedOut) {
           reject(
-            new Error(`Claude request timed out after ${timeoutMs}ms.`),
+            new EngineError(`Claude request timed out after ${timeoutMs}ms.`, 'timeout'),
           );
           return;
         }
 
         if (code !== 0) {
-          reject(this.createProcessError(stderrBuffer, code, signal));
+          reject(createProcessError(stderrBuffer, code, signal, CLAUDE_PROCESS_ERROR_OPTIONS));
           return;
         }
 
@@ -414,43 +413,34 @@ export class ClaudeEngine implements IEngine {
     return roundUsd(cost);
   }
 
-  private parseJsonLine(line: string): JsonRecord | undefined {
-    try {
-      const parsed = JSON.parse(line) as unknown;
-      return this.isJsonRecord(parsed) ? parsed : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
   private extractSessionId(event: JsonRecord): string | undefined {
     return (
       toStringValue(event.session_id) ??
-      toStringValue(this.getNestedValue(event, ["message", "session_id"])) ??
-      toStringValue(this.getNestedValue(event, ["result", "session_id"]))
+      toStringValue(getNestedValue(event, ["message", "session_id"])) ??
+      toStringValue(getNestedValue(event, ["result", "session_id"]))
     );
   }
 
   private extractTotalCost(event: JsonRecord): number | undefined {
     const value =
       event.total_cost_usd ??
-      this.getNestedValue(event, ["message", "total_cost_usd"]) ??
-      this.getNestedValue(event, ["result", "total_cost_usd"]);
+      getNestedValue(event, ["message", "total_cost_usd"]) ??
+      getNestedValue(event, ["result", "total_cost_usd"]);
 
     return toOptionalNumber(value);
   }
 
   private extractUsage(event: JsonRecord): ClaudeUsageDelta | undefined {
     const usageCandidate =
-      this.getJsonRecord(event.usage) ??
-      this.getJsonRecord(this.getNestedValue(event, ["message", "usage"])) ??
-      this.getJsonRecord(this.getNestedValue(event, ["result", "usage"]));
+      getJsonRecord(event.usage) ??
+      getJsonRecord(getNestedValue(event, ["message", "usage"])) ??
+      getJsonRecord(getNestedValue(event, ["result", "usage"]));
 
     if (!usageCandidate) {
       return undefined;
     }
 
-    const cacheCreation = this.getJsonRecord(usageCandidate.cache_creation);
+    const cacheCreation = getJsonRecord(usageCandidate.cache_creation);
     const cacheCreation5m =
       toNumber(cacheCreation?.ephemeral_5m_input_tokens) ||
       (toNumber(usageCandidate.cache_creation_input_tokens) > 0 &&
@@ -488,7 +478,7 @@ export class ClaudeEngine implements IEngine {
       return { mode: "replace", text: event.result.trim() };
     }
 
-    const message = this.getJsonRecord(event.message);
+    const message = getJsonRecord(event.message);
     const eventType = toStringValue(event.type);
     const messageRole = toStringValue(message?.role);
     const contentText = this.extractContentText(message?.content);
@@ -496,12 +486,12 @@ export class ClaudeEngine implements IEngine {
       return { mode: "replace", text: contentText };
     }
 
-    const delta = this.getJsonRecord(event.delta);
+    const delta = getJsonRecord(event.delta);
     if (typeof delta?.text === "string") {
       return { mode: "append", text: delta.text };
     }
 
-    const contentBlock = this.getJsonRecord(event.content_block);
+    const contentBlock = getJsonRecord(event.content_block);
     if (typeof contentBlock?.text === "string") {
       return { mode: "append", text: contentBlock.text };
     }
@@ -524,7 +514,7 @@ export class ClaudeEngine implements IEngine {
 
     const text = content
       .map((item) => {
-        if (!this.isJsonRecord(item)) {
+        if (!isJsonRecord(item)) {
           return "";
         }
 
@@ -535,70 +525,11 @@ export class ClaudeEngine implements IEngine {
 
     return text.trim();
   }
-
-  private createSpawnError(error: unknown): EngineError {
-    if (this.isJsonRecord(error) && error.code === "ENOENT") {
-      return new EngineError(
-        "Claude CLI not found. Install `claude` and ensure it is available on PATH.",
-        'unavailable',
-      );
-    }
-
-    const message = error instanceof Error ? error.message : "Claude process failed to start.";
-    return new EngineError(message || "Claude process failed to start.", 'unknown', { cause: error });
-  }
-
-  private createProcessError(
-    stderr: string,
-    code: number | null,
-    signal: string | null,
-  ): EngineError {
-    const trimmed = stderr.trim();
-
-    if (
-      /auth|login|expired|unauthorized|forbidden|credential/i.test(trimmed)
-    ) {
-      return new EngineError(
-        "Claude authentication appears to be expired. Re-authenticate the Claude CLI.",
-        'auth_expired',
-      );
-    }
-
-    const detail = trimmed || `exit code ${code ?? "unknown"} signal ${signal ?? "none"}`;
-    return new EngineError(`Claude command failed: ${detail}`, 'unknown');
-  }
-
-  private getNestedValue(record: JsonRecord, path: string[]): unknown {
-    let current: unknown = record;
-
-    for (const segment of path) {
-      if (!this.isJsonRecord(current)) {
-        return undefined;
-      }
-
-      current = current[segment];
-    }
-
-    return current;
-  }
-
-  private getJsonRecord(value: unknown): JsonRecord | undefined {
-    return this.isJsonRecord(value) ? value : undefined;
-  }
-
-  private chunkToString(chunk: unknown): string {
-    if (typeof chunk === "string") {
-      return chunk;
-    }
-
-    if (chunk instanceof Uint8Array) {
-      return new TextDecoder().decode(chunk);
-    }
-
-    return String(chunk);
-  }
-
-  private isJsonRecord(value: unknown): value is JsonRecord {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  }
 }
+
+const CLAUDE_PROCESS_ERROR_OPTIONS = {
+  engineLabel: "Claude",
+  authRegex: /auth|login|expired|unauthorized|forbidden|credential/i,
+  authMessage: "Claude authentication appears to be expired. Re-authenticate the Claude CLI.",
+  authCategory: "auth_expired" as const,
+};

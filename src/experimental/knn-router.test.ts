@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { KnnRouter } from '../orchestration/knn-router.js';
-import { cosineSimilarity, EmbeddingClient } from '../orchestration/embedding-client.js';
-import type { EmbeddingRecord } from '../orchestration/knn-router.js';
+import { KnnRouter } from './knn-router.js';
+import { cosineSimilarity, EmbeddingClient } from './embedding-client.js';
+import type { EmbeddingRecord } from './knn-router.js';
 
 describe('cosineSimilarity', () => {
   it('returns 1 for identical vectors', () => {

@@ -87,27 +87,9 @@ export function validateWorkflow(definition: WorkflowDefinition): void {
     }
   }
 
-  if (definition.mode === 'loop') {
-    // Loop mode: allow cycles but require at least one step in the cycle
-    // to have a loop config with maxIterations as a guard
-    const cycle = detectCycle(definition.steps);
-    if (cycle) {
-      const hasLoopGuard = cycle.some(stepId => {
-        const step = definition.steps.find(s => s.id === stepId);
-        return step?.loop?.maxIterations != null && step.loop.maxIterations > 0;
-      });
-      if (!hasLoopGuard) {
-        throw new Error(
-          `Loop workflow cycle [${cycle.join(' → ')}] must have at least one step with loop.maxIterations configured.`,
-        );
-      }
-    }
-  } else {
-    // DAG mode (default): reject cycles
-    const cycle = detectCycle(definition.steps);
-    if (cycle) {
-      throw new Error(`Workflow contains a cycle: ${cycle.join(' → ')}.`);
-    }
+  const cycle = detectCycle(definition.steps);
+  if (cycle) {
+    throw new Error(`Workflow contains a cycle: ${cycle.join(' → ')}.`);
   }
 }
 
@@ -231,9 +213,9 @@ export class WorkflowEngine {
       this.workflows.set(id, state);
     }
 
-    if (state.status !== 'running' && state.status !== 'interrupted') {
+    if (state.status !== 'running') {
       throw new Error(
-        `Workflow "${id}" cannot be resumed (status: ${state.status}). Only running or interrupted workflows can be resumed.`,
+        `Workflow "${id}" cannot be resumed (status: ${state.status}). Only running workflows can be resumed.`,
       );
     }
 
@@ -266,9 +248,7 @@ export class WorkflowEngine {
    */
   listInterrupted(): WorkflowState[] {
     const persisted = this.store.list();
-    return persisted.filter(
-      w => w.status === 'running' || w.status === 'interrupted',
-    );
+    return persisted.filter(w => w.status === 'running');
   }
 
   getStatus(id: string): WorkflowState | undefined {

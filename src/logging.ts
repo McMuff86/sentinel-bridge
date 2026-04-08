@@ -108,6 +108,12 @@ export class StructuredLogger {
           this.external.error(line);
           break;
       }
+    } else {
+      if (level === 'error' || level === 'warn') {
+        console.error(line);
+      } else {
+        console.log(line);
+      }
     }
   }
 }

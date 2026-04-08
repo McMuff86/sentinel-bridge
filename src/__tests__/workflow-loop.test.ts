@@ -113,10 +113,10 @@ describe('evaluateLoopCondition', () => {
   });
 });
 
-/* ── validateWorkflow with loop mode ──────────────────────────── */
+/* ── validateWorkflow cycle detection ──────────────────────────── */
 
-describe('validateWorkflow loop mode', () => {
-  it('should still reject cycles in default (dag) mode', () => {
+describe('validateWorkflow cycle detection', () => {
+  it('should reject cycles', () => {
     const def: WorkflowDefinition = {
       id: 'wf-dag-cycle',
       name: 'DAG Cycle',
@@ -129,26 +129,11 @@ describe('validateWorkflow loop mode', () => {
     expect(() => validateWorkflow(def)).toThrow('cycle');
   });
 
-  it('should reject cycles in explicit dag mode', () => {
-    const def: WorkflowDefinition = {
-      id: 'wf-dag-cycle-explicit',
-      name: 'DAG Cycle Explicit',
-      workspace: 'ws',
-      mode: 'dag',
-      steps: [
-        { id: 's1', sessionName: 'sess-1', task: 'A', dependsOn: ['s2'] },
-        { id: 's2', sessionName: 'sess-2', task: 'B', dependsOn: ['s1'] },
-      ],
-    };
-    expect(() => validateWorkflow(def)).toThrow('cycle');
-  });
-
-  it('should allow cycles in loop mode when step has loop guard', () => {
+  it('should reject cycles even with loop guards on steps', () => {
     const def: WorkflowDefinition = {
       id: 'wf-loop-ok',
       name: 'Loop OK',
       workspace: 'ws',
-      mode: 'loop',
       steps: [
         {
           id: 's1',
@@ -160,29 +145,14 @@ describe('validateWorkflow loop mode', () => {
         { id: 's2', sessionName: 'sess-2', task: 'Review', dependsOn: ['s1'] },
       ],
     };
-    expect(() => validateWorkflow(def)).not.toThrow();
+    expect(() => validateWorkflow(def)).toThrow('cycle');
   });
 
-  it('should reject cycles in loop mode without loop guard', () => {
-    const def: WorkflowDefinition = {
-      id: 'wf-loop-no-guard',
-      name: 'Loop No Guard',
-      workspace: 'ws',
-      mode: 'loop',
-      steps: [
-        { id: 's1', sessionName: 'sess-1', task: 'A', dependsOn: ['s2'] },
-        { id: 's2', sessionName: 'sess-2', task: 'B', dependsOn: ['s1'] },
-      ],
-    };
-    expect(() => validateWorkflow(def)).toThrow('loop.maxIterations configured');
-  });
-
-  it('should accept loop mode with no cycles (DAG-compatible loop workflow)', () => {
+  it('should accept DAG with step-level loops and no graph cycles', () => {
     const def: WorkflowDefinition = {
       id: 'wf-loop-no-cycle',
       name: 'Loop No Cycle',
       workspace: 'ws',
-      mode: 'loop',
       steps: [
         {
           id: 's1',

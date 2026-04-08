@@ -21,8 +21,6 @@ import { CircuitBreaker } from './orchestration/circuit-breaker.js';
 import type { CircuitSnapshot } from './orchestration/circuit-breaker.js';
 import { HealthChecker } from './orchestration/health-check.js';
 import type { HealthCheckResult } from './orchestration/health-check.js';
-import { SessionQueue } from './orchestration/session-queue.js';
-import type { QueuePriority, QueueSnapshot } from './orchestration/session-queue.js';
 import { AdaptiveRouter } from './orchestration/adaptive-router.js';
 import type { RoutingStats, RoutingStrategy } from './orchestration/adaptive-router.js';
 import { RoutingStatsStore } from './orchestration/routing-stats-store.js';
@@ -98,7 +96,6 @@ export class SessionManager {
   readonly workflows: WorkflowEngine;
   readonly circuitBreaker: CircuitBreaker;
   readonly healthChecker: HealthChecker;
-  readonly sessionQueue: SessionQueue;
   readonly adaptiveRouter: AdaptiveRouter;
   private readonly routingStatsStore: RoutingStatsStore;
   readonly registry: EngineRegistry;
@@ -113,7 +110,6 @@ export class SessionManager {
     this.roles = new RoleRegistry(this.roleStore.list());
     this.circuitBreaker = new CircuitBreaker(config.circuitBreaker);
     this.healthChecker = new HealthChecker(config.healthCheck, this.circuitBreaker);
-    this.sessionQueue = new SessionQueue(config.queue);
     this.workflows = new WorkflowEngine();
     this.log = new StructuredLogger(externalLogger);
     this.routingStatsStore = new RoutingStatsStore();
@@ -143,6 +139,16 @@ export class SessionManager {
   }
 
   async startSession(options: SessionStartOptions): Promise<SessionInfo> {
+    validateSessionName(options.name);
+    const release = await this.mutex.acquire(options.name);
+    try {
+      return await this.startSessionInner(options);
+    } finally {
+      release();
+    }
+  }
+
+  private async startSessionInner(options: SessionStartOptions): Promise<SessionInfo> {
     // Resolve role and apply role defaults for engine/model if not explicitly set
     const role = options.role ? this.roles.get(options.role) : undefined;
     if (options.role && !role) {
@@ -720,10 +726,6 @@ export class SessionManager {
       this.emit('session_stopped', name, record.session.engine);
       this.log.info('session', `Session "${name}" stopped`, { session: name, engine: record.session.engine });
 
-      // Release a waiting session from the queue if any
-      if (this.sessionQueue.hasWaiters) {
-        this.sessionQueue.release();
-      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.log.error('session', `Failed to stop session "${name}": ${errMsg}`, { session: name, engine: record.session.engine });
@@ -759,7 +761,6 @@ export class SessionManager {
 
   async dispose(): Promise<void> {
     this.healthChecker.stop();
-    this.sessionQueue.rejectAll('SessionManager is shutting down.');
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer as unknown as number);
       this.cleanupTimer = null;
@@ -813,29 +814,6 @@ export class SessionManager {
         `Maximum concurrent session limit reached (${maxConcurrentSessions}).`,
       );
     }
-  }
-
-  /**
-   * Wait in the backpressure queue until a session slot is available.
-   * If already under the limit, returns immediately.
-   */
-  async waitForSlot(sessionName: string, priority: QueuePriority = 'normal'): Promise<void> {
-    if (!this.isAtSessionLimit()) return;
-
-    this.log.info('orchestration', `Session "${sessionName}" waiting in queue (priority: ${priority})`, {
-      session: sessionName,
-      meta: { queueDepth: this.sessionQueue.depth, priority },
-    });
-
-    await this.sessionQueue.enqueue(sessionName, priority);
-
-    this.log.info('orchestration', `Session "${sessionName}" released from queue`, {
-      session: sessionName,
-    });
-  }
-
-  getQueueSnapshot(): QueueSnapshot {
-    return this.sessionQueue.getSnapshot();
   }
 
   private resolveEngineConfig(
@@ -1128,11 +1106,15 @@ export class SessionManager {
     validateSessionName(from);
     validateSessionName(to);
 
-    // Validate source session exists
+    // Validate source session exists and resolve its engine
     const fromRecord = this.sessions.get(from);
-    if (!fromRecord) {
+    let fromEngine: EngineKind;
+    if (fromRecord) {
+      fromEngine = fromRecord.session.engine;
+    } else {
       const persisted = this.store.get(from);
       if (!persisted) throw new Error(`Source session "${from}" not found.`);
+      fromEngine = persisted.engine;
     }
 
     // Send to target (sendMessage handles its own validation and mutex)
@@ -1140,7 +1122,7 @@ export class SessionManager {
 
     // Emit relay events on both session timelines
     const toRecord = this.requireSession(to);
-    this.emit('message_relayed', from, fromRecord?.session.engine ?? toRecord.session.engine, {
+    this.emit('message_relayed', from, fromEngine, {
       preview: `relay → ${to}`,
     });
     this.emit('message_relayed', to, toRecord.session.engine, {

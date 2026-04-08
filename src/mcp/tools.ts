@@ -410,7 +410,7 @@ export function buildMcpTools(manager: SessionManager): McpToolRegistration[] {
     return { ok: true, engine: params.engine, circuit: manager.getCircuitState(params.engine as EngineKind) };
   });
 
-  // ── Health & Queue ───────────────────────────────────────────
+  // ── Health ─────────────────────────────────────────────────
 
   add('sb_health_check', 'Run health probes on engines.', {
     type: 'object',
@@ -420,9 +420,6 @@ export function buildMcpTools(manager: SessionManager): McpToolRegistration[] {
     manager.startHealthChecks();
     return { ok: true, results };
   });
-
-  add('sb_queue_status', 'Show session queue depth and priority breakdown.', { type: 'object', properties: {} },
-    async () => ({ ok: true, queue: manager.getQueueSnapshot() }));
 
   return tools;
 }

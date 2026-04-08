@@ -4,6 +4,34 @@ All notable changes to sentinel-bridge are documented here.
 
 ## [Unreleased]
 
+### Refactored — Code Cleanup (2026-04-08)
+- **Bug fixes:** StructuredLogger now falls back to console when no external logger
+  is configured. Race condition in `startSession` fixed (mutex wraps duplicate check).
+  `relayMessage` correctly resolves source engine from persisted sessions. `routeTask`
+  reports actual adaptive strategy instead of hardcoded 'Thompson Sampling'. CodexEngine
+  now captures all agent messages instead of only the last one.
+- **CLI engine deduplication:** Extracted `cli-utils.ts` with shared helpers
+  (`parseJsonLine`, `getNestedValue`, `createSpawnError`, `createProcessError`,
+  `killProcessGracefully`) used by both ClaudeEngine and CodexEngine. Typed
+  `activeProcess` as `ChildProcess | null` (was `any`).
+- **Streaming contract:** `onChunk` callback now fires in ClaudeEngine (text deltas)
+  and CodexEngine (agent messages) during CLI output parsing.
+- **EngineError enforcement:** All engine classes now throw `EngineError` with
+  correct categories instead of plain `Error` (model required → `unknown`,
+  auth missing → `auth_expired`, CLI not found → `unavailable`, timeout → `timeout`).
+- **Removed unused modules:** `tracking.ts` (UsageTracker), `embedding-store.ts`,
+  `session-queue.ts` — none were wired into SessionManager or the tool surface.
+  Removed `sb_queue_status` tool. Tool count: 35 → 34.
+- **Experimental modules:** Moved `knn-router.ts` and `embedding-client.ts` to
+  `src/experimental/` with README documenting missing integration points.
+- **Simplified adaptive routing:** Removed `knn` and `ensemble` strategies from
+  AdaptiveRouter (depend on experimental KNN module). 6 → 4 strategies.
+- **Simplified workflows:** Removed graph-level `mode: 'loop'` (step-level loops
+  remain), `step.condition` (unused), and `interrupted` workflow status.
+- **Test improvements:** Deterministic workflow tests (polling instead of fixed
+  timeouts), concurrent store write tests, full lifecycle smoke test, additional
+  MCP compliance tests. 463 tests across 31 files.
+
 ### Added — Adaptive Routing (Phases 4-5, 8)
 - **Thompson Sampling** — `AdaptiveRouter` with Beta distributions (Marsaglia-Tsang
   Gamma sampling, Box-Muller normal). Per engine:category pair, learns which engine
@@ -82,15 +110,9 @@ All notable changes to sentinel-bridge are documented here.
 - **Entry point:** `node dist/mcp/index.js` or `npm run mcp` or `sentinel-bridge-mcp` (bin).
 - **Setup:** `claude mcp add sentinel-bridge -- node dist/mcp/index.js`
 
-### Added — Backpressure & Session Queue
-- **Priority session queue** — when `maxConcurrentSessions` is reached, new
-  session starts wait in a queue instead of being rejected. Three priority
-  levels: `high`, `normal`, `low`. Configurable `maxDepth` (default: 20)
-  and `timeoutMs` (default: 2 min).
-- **`sb_queue_status`** tool — shows queue depth and priority breakdown.
-- **Auto-release** — when a session stops, the next queued session is released.
-- **Graceful shutdown** — all queued entries rejected on `dispose()`.
-- **Tool count:** 32 → 33 tools.
+### Added — Backpressure & Session Queue _(removed in cleanup, see Unreleased)_
+- ~~Priority session queue, `sb_queue_status` tool.~~
+  Removed: was never integrated into SessionManager.
 
 ### Added — Health Checks
 - **Periodic engine health probes** — `HealthChecker` module probes all 4 engines:
@@ -107,13 +129,10 @@ All notable changes to sentinel-bridge are documented here.
 
 ### Added — Workflow Recovery
 - **Workflow checkpointing** — workflow state is persisted to disk after each
-  step completion/failure via `WorkflowStore`. Interrupted workflows (plugin
-  restart) are detectable via `listInterrupted()`.
-- **`sb_workflow_resume`** — resume interrupted or running workflows. Steps that
-  were mid-flight are reset to pending and re-executed; completed steps are
-  preserved.
-- **`interrupted` status** — new `WorkflowStatus` value for workflows that were
-  running when the plugin stopped.
+  step completion/failure via `WorkflowStore`. Running workflows are detectable
+  via `listInterrupted()`.
+- **`sb_workflow_resume`** — resume running workflows. Steps that were mid-flight
+  are reset to pending and re-executed; completed steps are preserved.
 - **Tool count:** 30 → 31 tools.
 
 ### Added — Circuit Breaker

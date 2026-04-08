@@ -105,6 +105,22 @@ import { SessionManager } from '../session-manager.js';
 import { validateWorkflow, WorkflowEngine } from '../orchestration/workflow-engine.js';
 import type { WorkflowDefinition, WorkflowState } from '../orchestration/workflow-types.js';
 
+async function waitForWorkflowDone(
+  manager: SessionManager,
+  workflowId: string,
+  timeoutMs = 3000,
+): Promise<WorkflowState> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = manager.getWorkflowStatus(workflowId);
+    if (status && status.status !== 'running') return status;
+    await new Promise(r => setTimeout(r, 20));
+  }
+  const final = manager.getWorkflowStatus(workflowId);
+  if (!final) throw new Error(`Workflow "${workflowId}" not found`);
+  return final;
+}
+
 describe('validateWorkflow', () => {
   it('should accept a valid linear workflow', () => {
     const def: WorkflowDefinition = {
@@ -218,13 +234,9 @@ describe('WorkflowEngine integration', () => {
     expect(state.id).toBe('wf-single');
     expect(state.status).toBe('running');
 
-    // Wait for async execution
-    await new Promise(r => setTimeout(r, 200));
-
-    const status = manager.getWorkflowStatus('wf-single');
-    expect(status).toBeDefined();
-    expect(status!.steps['s1'].status).toBe('completed');
-    expect(status!.status).toBe('completed');
+    const status = await waitForWorkflowDone(manager, 'wf-single');
+    expect(status.steps['s1'].status).toBe('completed');
+    expect(status.status).toBe('completed');
   });
 
   it('should execute pipeline steps in order', async () => {
@@ -246,13 +258,12 @@ describe('WorkflowEngine integration', () => {
     };
 
     await manager.startWorkflow(def);
-    await new Promise(r => setTimeout(r, 500));
 
-    const status = manager.getWorkflowStatus('wf-pipe');
-    expect(status!.status).toBe('completed');
-    expect(status!.steps['s1'].status).toBe('completed');
-    expect(status!.steps['s2'].status).toBe('completed');
-    expect(status!.steps['s3'].status).toBe('completed');
+    const status = await waitForWorkflowDone(manager, 'wf-pipe');
+    expect(status.status).toBe('completed');
+    expect(status.steps['s1'].status).toBe('completed');
+    expect(status.steps['s2'].status).toBe('completed');
+    expect(status.steps['s3'].status).toBe('completed');
   });
 
   it('should skip dependent steps when a step fails', async () => {
@@ -274,12 +285,11 @@ describe('WorkflowEngine integration', () => {
     };
 
     await manager.startWorkflow(def);
-    await new Promise(r => setTimeout(r, 300));
 
-    const status = manager.getWorkflowStatus('wf-fail');
-    expect(status!.steps['s1'].status).toBe('failed');
-    expect(status!.steps['s2'].status).toBe('skipped');
-    expect(status!.status).toBe('failed');
+    const status = await waitForWorkflowDone(manager, 'wf-fail');
+    expect(status.steps['s1'].status).toBe('failed');
+    expect(status.steps['s2'].status).toBe('skipped');
+    expect(status.status).toBe('failed');
   });
 
   it('should cancel a running workflow', async () => {
@@ -299,7 +309,7 @@ describe('WorkflowEngine integration', () => {
     };
 
     await manager.startWorkflow(def);
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 30));
 
     const cancelled = manager.cancelWorkflow('wf-cancel');
     expect(cancelled.status).toBe('cancelled');
@@ -314,6 +324,8 @@ describe('WorkflowEngine integration', () => {
     };
 
     await manager.startWorkflow(def);
+    await waitForWorkflowDone(manager, 'wf-list-test');
+
     const list = manager.listWorkflows();
     expect(list.length).toBeGreaterThanOrEqual(1);
     expect(list.some(w => w.id === 'wf-list-test')).toBe(true);
@@ -369,12 +381,11 @@ describe('Workflow Recovery', () => {
     };
 
     await manager.startWorkflow(def);
-    await new Promise(r => setTimeout(r, 500));
 
-    const status = manager.getWorkflowStatus('wf-resume');
-    expect(status!.status).toBe('completed');
-    expect(status!.steps['s1'].status).toBe('completed');
-    expect(status!.steps['s2'].status).toBe('completed');
+    const status = await waitForWorkflowDone(manager, 'wf-resume');
+    expect(status.status).toBe('completed');
+    expect(status.steps['s1'].status).toBe('completed');
+    expect(status.steps['s2'].status).toBe('completed');
   });
 
   it('should not resume a completed workflow', async () => {
@@ -386,7 +397,7 @@ describe('Workflow Recovery', () => {
     };
 
     await manager.startWorkflow(def);
-    await new Promise(r => setTimeout(r, 200));
+    await waitForWorkflowDone(manager, 'wf-completed');
 
     await expect(manager.resumeWorkflow('wf-completed')).rejects.toThrow('cannot be resumed');
   });
@@ -416,13 +427,11 @@ describe('Workflow Recovery', () => {
     };
 
     await manager.startWorkflow(def);
-    await new Promise(r => setTimeout(r, 500));
 
-    // Workflow should be completed
-    const status = manager.getWorkflowStatus('wf-resume-running');
-    expect(status!.status).toBe('completed');
-    expect(status!.steps['s1'].status).toBe('completed');
-    expect(status!.steps['s2'].status).toBe('completed');
+    const status = await waitForWorkflowDone(manager, 'wf-resume-running');
+    expect(status.status).toBe('completed');
+    expect(status.steps['s1'].status).toBe('completed');
+    expect(status.steps['s2'].status).toBe('completed');
   });
 
   it('should list interrupted workflows', () => {

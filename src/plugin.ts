@@ -62,13 +62,6 @@ export interface SentinelBridgeConfig {
     cooldownMs?: number;
     halfOpenSuccessThreshold?: number;
   };
-  /** Session queue for backpressure when at max concurrent sessions */
-  queue?: {
-    /** Max items in queue. Default: 20. 0 = unlimited. */
-    maxDepth?: number;
-    /** Max wait time in ms. Default: 120000 (2 min). */
-    timeoutMs?: number;
-  };
   /** Health check settings for periodic engine probing */
   healthCheck?: {
     intervalMs?: number;

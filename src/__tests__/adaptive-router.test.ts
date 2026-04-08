@@ -298,51 +298,6 @@ describe('strategy property', () => {
     expect(router.selectEngine('code_generation', ['claude', 'codex'])).toBeNull();
   });
 
-  it('accepts knn strategy', () => {
-    const router = new AdaptiveRouter();
-    router.strategy = 'knn';
-    expect(router.strategy).toBe('knn');
-  });
-
-  it('accepts ensemble strategy', () => {
-    const router = new AdaptiveRouter();
-    router.strategy = 'ensemble';
-    expect(router.strategy).toBe('ensemble');
-  });
-
-  it('knn strategy falls back to thompson in sync selectEngine', () => {
-    const router = new AdaptiveRouter(3);
-    router.strategy = 'knn';
-    for (let i = 0; i < 10; i++) {
-      router.recordOutcome('claude', 'code_generation', true);
-      router.recordOutcome('codex', 'code_generation', true);
-    }
-    // Should still return a result (thompson fallback)
-    const result = router.selectEngine('code_generation', ['claude', 'codex']);
-    expect(result).not.toBeNull();
-    expect(result!.method).toBe('thompson');
-  });
-
-  it('ensemble strategy falls back to thompson in sync selectEngine', () => {
-    const router = new AdaptiveRouter(3);
-    router.strategy = 'ensemble';
-    for (let i = 0; i < 10; i++) {
-      router.recordOutcome('claude', 'code_generation', true);
-      router.recordOutcome('codex', 'code_generation', true);
-    }
-    const result = router.selectEngine('code_generation', ['claude', 'codex']);
-    expect(result).not.toBeNull();
-    expect(result!.method).toBe('thompson');
-  });
-
-  it('setKnnRouter / knnRouter getter work', () => {
-    const router = new AdaptiveRouter();
-    expect(router.knnRouter).toBeNull();
-
-    const mockKnn = {} as any;
-    router.setKnnRouter(mockKnn);
-    expect(router.knnRouter).toBe(mockKnn);
-  });
 });
 
 describe('betaSample', () => {

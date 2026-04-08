@@ -16,7 +16,6 @@ export interface WorkflowStepDefinition {
   engine?: EngineKind;
   model?: string;
   loop?: LoopConfig;
-  condition?: string;
 }
 
 export interface WorkflowDefinition {
@@ -25,7 +24,6 @@ export interface WorkflowDefinition {
   description?: string;
   workspace: string;
   steps: WorkflowStepDefinition[];
-  mode?: 'dag' | 'loop';
 }
 
 export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -42,7 +40,7 @@ export interface WorkflowStepState {
   iteration?: number;
 }
 
-export type WorkflowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+export type WorkflowStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface WorkflowState {
   id: string;

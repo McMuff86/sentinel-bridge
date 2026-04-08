@@ -45,14 +45,14 @@ sentinel-bridge/
 │   ├── session-manager.ts        # SessionManager orchestrator (mutex-protected)
 │   ├── errors.ts                 # EngineError class with typed categories
 │   ├── logging.ts                # StructuredLogger with JSON entries + categories
-│   ├── tracking.ts               # UsageTracker: JSONL usage log, summaries
 │   ├── engines/
 │   │   ├── engine-contract.ts    # IEngineFactory interface
 │   │   ├── engine-registry.ts    # EngineRegistry: 4 built-in + extensible via register()
-│   │   ├── claude-engine.ts      # ClaudeEngine: CLI subprocess, stream-json
-│   │   ├── codex-engine.ts       # CodexEngine: CLI per-message, auth detection
+│   │   ├── claude-engine.ts      # ClaudeEngine: CLI subprocess, stream-json, onChunk streaming
+│   │   ├── codex-engine.ts       # CodexEngine: CLI per-message, auth detection, onChunk streaming
 │   │   ├── grok-engine.ts        # GrokEngine: HTTP API, retry with backoff
 │   │   ├── ollama-engine.ts      # OllamaEngine: local LLM, streaming SSE, retry
+│   │   ├── cli-utils.ts          # Shared CLI engine utilities (JSON parsing, process errors, kill)
 │   │   ├── create-engine.ts      # Thin wrapper over EngineRegistry
 │   │   └── shared.ts             # mergeEngineConfig, token/cost math, utilities
 │   ├── routing/
@@ -63,27 +63,23 @@ sentinel-bridge/
 │   │   ├── select-engine.ts      # Capability-based primary engine selection
 │   │   └── provider-capabilities.ts # Light capability registry
 │   ├── orchestration/
-│   │   ├── adaptive-router.ts    # AdaptiveRouter: 6 strategies (Thompson/EMA/blended/KNN/ensemble/static)
+│   │   ├── adaptive-router.ts    # AdaptiveRouter: 4 strategies (Thompson/EMA/blended/static)
 │   │   ├── routing-stats-store.ts # JSON persistence for routing Beta params
-│   │   ├── embedding-client.ts   # Ollama nomic-embed-text client + cosineSimilarity()
-│   │   ├── knn-router.ts         # KNN router with embedding records, K-nearest vote
-│   │   ├── embedding-store.ts    # JSONL persistence for embedding records (10k cap)
 │   │   ├── loop-evaluator.ts     # evaluateLoopCondition(): string match + convergence
 │   │   ├── context-store.ts      # Shared blackboard (atomic JSON per workspace)
 │   │   ├── context-events.ts     # JSONL audit trail for context mutations
 │   │   ├── roles.ts              # AgentRole interface, BUILT_IN_ROLES (6), RoleRegistry
 │   │   ├── role-store.ts         # Persistent custom roles (atomic JSON)
 │   │   ├── relay.ts              # RelayResult / BroadcastResult types
-│   │   ├── workflow-types.ts     # WorkflowDefinition, WorkflowState, LoopConfig
-│   │   ├── workflow-engine.ts    # DAG + loop executor: validation, topological execution
+│   │   ├── workflow-types.ts     # WorkflowDefinition, WorkflowState
+│   │   ├── workflow-engine.ts    # DAG executor: validation, topological execution
 │   │   ├── workflow-store.ts     # Persistent workflow state (atomic JSON)
 │   │   ├── workflow-templates.ts # Pipeline, fan-out/fan-in, autoresearch factories
 │   │   ├── task-classifier.ts    # Keyword/pattern task classification
 │   │   ├── task-router.ts        # Content-based engine recommendation (static + adaptive)
 │   │   ├── cost-tiers.ts         # Engine cost ranking
 │   │   ├── circuit-breaker.ts    # Per-engine circuit breaker (closed/open/half-open)
-│   │   ├── health-check.ts       # Periodic engine health probes (CLI/HTTP)
-│   │   └── session-queue.ts      # Priority queue for backpressure
+│   │   └── health-check.ts       # Periodic engine health probes (CLI/HTTP)
 │   ├── sessions/
 │   │   ├── session-store.ts      # JSON persistence (atomic writes)
 │   │   ├── session-events.ts     # JSONL event timeline per session
@@ -94,8 +90,13 @@ sentinel-bridge/
 │   ├── mcp/
 │   │   ├── index.ts              # MCP server entry point (stdio)
 │   │   ├── server.ts             # JSON-RPC 2.0 protocol handler
-│   │   └── tools.ts              # Maps all 35 sb_* tools to MCP format
-│   └── __tests__/                # 480 tests across 33 files
+│   │   └── tools.ts              # Maps all 34 sb_* tools to MCP format
+│   ├── experimental/             # Experimental modules (not wired into core)
+│   │   ├── knn-router.ts         # KNN router (requires embedding integration)
+│   │   ├── knn-router.test.ts    # KNN router tests
+│   │   ├── embedding-client.ts   # Ollama nomic-embed-text client + cosineSimilarity()
+│   │   └── README.md             # Integration status and requirements
+│   └── __tests__/                # 463 tests across 31 files
 │       ├── session-manager.test.ts
 │       ├── claude-engine.test.ts
 │       ├── codex-engine.test.ts
@@ -103,12 +104,12 @@ sentinel-bridge/
 │       ├── ollama-engine.test.ts
 │       ├── errors.test.ts
 │       ├── logging.test.ts
+│       ├── shared.test.ts
 │       ├── session-mutex.test.ts
 │       ├── session-store.test.ts
 │       ├── session-events.test.ts
 │       ├── session-name-validation.test.ts
 │       ├── config-merge.test.ts
-│       ├── tracking.test.ts
 │       ├── index.test.ts
 │       ├── plugin.test.ts
 │       ├── types.test.ts
@@ -122,19 +123,17 @@ sentinel-bridge/
 │       ├── task-router.test.ts
 │       ├── circuit-breaker.test.ts
 │       ├── health-check.test.ts
-│       ├── session-queue.test.ts
 │       ├── mcp-server.test.ts
 │       ├── routing.test.ts
 │       ├── engine-registry.test.ts
-│       ├── adaptive-router.test.ts
-│       └── knn-router.test.ts
+│       └── adaptive-router.test.ts
 └── dist/                         # Compiled output (gitignored)
 ```
 
 ## Testing Strategy
 
 - **Framework:** vitest (run via `npx vitest run`)
-- **Unit tests:** 480 tests across 33 test files in `src/__tests__/`
+- **Unit tests:** 463 tests across 31 test files in `src/__tests__/` + `src/experimental/`
 - **Mocking:** Mock child_process.spawn for CLI engines, mock fetch for Grok/Ollama, mock stores for orchestration
 - **Test naming:** `describe('ClassName')` → `it('should do X when Y')`
 - **No integration tests in CI** — integration tests require actual CLI binaries and API keys, run manually

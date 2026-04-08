@@ -67,7 +67,7 @@ export class GrokEngine implements IEngine {
     if (!this.config.model) {
       this.state = "error";
       this.usage.lastError = "Grok model is required.";
-      throw new Error(this.usage.lastError);
+      throw new EngineError(this.usage.lastError, 'unknown');
     }
 
     if (!this.resolveApiKey()) {
@@ -83,7 +83,7 @@ export class GrokEngine implements IEngine {
     this.state = "running";
   }
 
-  async send(message: string, _onChunk?: (chunk: string) => void): Promise<string> {
+  async send(message: string, _onChunk?: (chunk: string) => void): Promise<string> { // TODO: enable streaming with `stream: true` in API call
     if (!message.trim()) {
       return "";
     }
@@ -93,7 +93,7 @@ export class GrokEngine implements IEngine {
     }
 
     if (this.activeAbortController) {
-      throw new Error("Grok engine already has a request in flight.");
+      throw new EngineError("Grok engine already has a request in flight.", 'unknown');
     }
 
     const apiKey = this.resolveApiKey();
@@ -320,12 +320,12 @@ export class GrokEngine implements IEngine {
     const firstChoice = choices[0];
 
     if (!this.isJsonRecord(firstChoice)) {
-      throw new Error("Grok API response did not include a completion choice.");
+      throw new EngineError("Grok API response did not include a completion choice.", 'unknown');
     }
 
     const message = this.getJsonRecord(firstChoice.message);
     if (!message) {
-      throw new Error("Grok API response did not include a message payload.");
+      throw new EngineError("Grok API response did not include a message payload.", 'unknown');
     }
 
     const content = this.normalizeMessageContent(message.content);

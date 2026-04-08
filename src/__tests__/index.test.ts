@@ -14,7 +14,7 @@ describe('activate', () => {
 
     activate(mockApi);
 
-    expect(registered).toHaveLength(35);
+    expect(registered).toHaveLength(34);
     expect(registered).toContain('sb_session_start');
     expect(registered).toContain('sb_session_send');
     expect(registered).toContain('sb_session_stop');
@@ -46,7 +46,7 @@ describe('activate', () => {
     expect(registered).toContain('sb_route_task');
     expect(registered).toContain('sb_routing_stats');
     expect(registered).toContain('sb_routing_config');
-    expect(registered).toContain('sb_queue_status');
+    // sb_queue_status removed — SessionQueue was unconnected and removed
     expect(registered).toContain('sb_health_check');
     expect(registered).toContain('sb_circuit_status');
     expect(registered).toContain('sb_circuit_reset');

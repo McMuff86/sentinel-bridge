@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 
 import type {
   EngineConfig,
@@ -8,7 +9,6 @@ import type {
   IEngine,
   ModelPricing,
 } from "../types.js";
-import { EngineError } from "../errors.js";
 import {
   buildCompactPrompt,
   calculateLinearUsageCost,
@@ -20,6 +20,18 @@ import {
   toNumber,
   toStringValue,
 } from "./shared.js";
+import { EngineError } from "../errors.js";
+import {
+  type JsonRecord,
+  parseJsonLine,
+  getNestedValue,
+  getJsonRecord,
+  chunkToString,
+  isJsonRecord,
+  createSpawnError,
+  createProcessError,
+  killProcessGracefully,
+} from "./cli-utils.js";
 
 type CodexAuthMethod = "subscription" | "apiKey" | "none";
 
@@ -37,8 +49,6 @@ type CodexRunResult = {
   };
 };
 
-type JsonRecord = Record<string, unknown>;
-
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 export class CodexEngine implements IEngine {
@@ -49,7 +59,7 @@ export class CodexEngine implements IEngine {
     costUsd: 0,
     tokenCount: emptyTokenUsage(),
   };
-  private activeProcess: any = null;
+  private activeProcess: ChildProcess | null = null;
   private sentAtLeastOnePrompt = false;
   private authMethod: CodexAuthMethod = "none";
 
@@ -73,7 +83,7 @@ export class CodexEngine implements IEngine {
     if (!this.config.model) {
       this.state = "error";
       this.usage.lastError = "Codex model is required.";
-      throw new Error(this.usage.lastError);
+      throw new EngineError(this.usage.lastError, 'unknown');
     }
 
     this.authMethod = await this.detectAuth();
@@ -81,7 +91,7 @@ export class CodexEngine implements IEngine {
       this.state = "error";
       this.usage.lastError =
         "Codex authentication is unavailable. Configure `apiKey` or sign in with `codex auth login`.";
-      throw new Error(this.usage.lastError);
+      throw new EngineError(this.usage.lastError, 'auth_expired');
     }
 
     this.usage.lastError = undefined;
@@ -89,7 +99,7 @@ export class CodexEngine implements IEngine {
     this.state = "running";
   }
 
-  async send(message: string, _onChunk?: (chunk: string) => void): Promise<string> {
+  async send(message: string, onChunk?: (chunk: string) => void): Promise<string> {
     if (!message.trim()) {
       return "";
     }
@@ -99,11 +109,11 @@ export class CodexEngine implements IEngine {
     }
 
     if (this.activeProcess) {
-      throw new Error("Codex engine already has a request in flight.");
+      throw new EngineError("Codex engine already has a request in flight.", 'unknown');
     }
 
     try {
-      const result = await this.runCodex(message);
+      const result = await this.runCodex(message, onChunk);
       const pricing = this.resolvePricing();
 
       if (result.usage) {
@@ -147,20 +157,7 @@ export class CodexEngine implements IEngine {
     if (this.activeProcess) {
       const processToStop = this.activeProcess;
       this.activeProcess = null;
-
-      processToStop.kill("SIGTERM");
-
-      await new Promise<void>((resolve) => {
-        const forceKillTimer = setTimeout(() => {
-          processToStop.kill("SIGKILL");
-          resolve();
-        }, 1_000);
-
-        processToStop.once("close", () => {
-          clearTimeout(forceKillTimer);
-          resolve();
-        });
-      });
+      await killProcessGracefully(processToStop);
     }
 
     this.state = "stopped";
@@ -185,7 +182,7 @@ export class CodexEngine implements IEngine {
     return this.sessionId;
   }
 
-  private async runCodex(message: string): Promise<CodexRunResult> {
+  private async runCodex(message: string, onChunk?: (chunk: string) => void): Promise<CodexRunResult> {
     const command = this.config.command ?? "codex";
     const args = this.buildArgs(message);
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -208,7 +205,7 @@ export class CodexEngine implements IEngine {
     return await new Promise<CodexRunResult>((resolve, reject) => {
       let stdoutBuffer = "";
       let stderrBuffer = "";
-      let lastAgentMessage = "";
+      const agentMessages: string[] = [];
       let observedSessionId = this.sessionId;
       let usage:
         | {
@@ -248,7 +245,7 @@ export class CodexEngine implements IEngine {
             continue;
           }
 
-          const event = this.parseJsonLine(line);
+          const event = parseJsonLine(line);
           if (!event) {
             continue;
           }
@@ -263,24 +260,27 @@ export class CodexEngine implements IEngine {
 
           const agentMessage = this.extractAgentMessage(event);
           if (agentMessage) {
-            lastAgentMessage = agentMessage;
+            agentMessages.push(agentMessage);
+            if (onChunk) {
+              try { onChunk(agentMessage); } catch { /* non-fatal */ }
+            }
           }
         }
       };
 
       child.stdout.on("data", (chunk: unknown) => {
-        stdoutBuffer += this.chunkToString(chunk);
+        stdoutBuffer += chunkToString(chunk);
         flushStdout();
       });
 
       child.stderr.on("data", (chunk: unknown) => {
-        stderrBuffer += this.chunkToString(chunk);
+        stderrBuffer += chunkToString(chunk);
       });
 
       child.once("error", (error: unknown) => {
         clearTimeout(timeoutHandle);
         this.activeProcess = null;
-        reject(this.createSpawnError(error));
+        reject(createSpawnError("Codex", error));
       });
 
       child.once("close", (code: number | null, signal: string | null) => {
@@ -293,22 +293,22 @@ export class CodexEngine implements IEngine {
         }
 
         if (timedOut) {
-          reject(new Error(`Codex request timed out after ${timeoutMs}ms.`));
+          reject(new EngineError(`Codex request timed out after ${timeoutMs}ms.`, 'timeout'));
           return;
         }
 
         if (runtimeError) {
-          reject(new Error(runtimeError));
+          reject(new EngineError(runtimeError, 'unknown'));
           return;
         }
 
         if (code !== 0) {
-          reject(this.createProcessError(stderrBuffer, code, signal));
+          reject(createProcessError(stderrBuffer, code, signal, CODEX_PROCESS_ERROR_OPTIONS));
           return;
         }
 
         resolve({
-          text: lastAgentMessage.trim(),
+          text: agentMessages.join('\n\n').trim(),
           sessionId: observedSessionId,
           usage,
         });
@@ -365,16 +365,16 @@ export class CodexEngine implements IEngine {
       });
 
       child.stdout.on("data", (chunk: unknown) => {
-        stdoutBuffer += this.chunkToString(chunk);
+        stdoutBuffer += chunkToString(chunk);
       });
 
       child.stderr.on("data", (chunk: unknown) => {
-        stderrBuffer += this.chunkToString(chunk);
+        stderrBuffer += chunkToString(chunk);
       });
 
       child.once("error", (error: unknown) => {
-        if (this.isJsonRecord(error) && error.code === "ENOENT") {
-          settle((_, rejectValue) => rejectValue(this.createSpawnError(error)));
+        if (isJsonRecord(error) && error.code === "ENOENT") {
+          settle((_, rejectValue) => rejectValue(createSpawnError("Codex", error)));
           return;
         }
 
@@ -387,7 +387,7 @@ export class CodexEngine implements IEngine {
           .join("\n")
           .trim();
 
-        if (this.hasSubscriptionAuth(rawOutput, code)) {
+        if (this.detectSubscriptionAuth(rawOutput, code)) {
           settle((resolveValue) => resolveValue("subscription"));
           return;
         }
@@ -419,20 +419,11 @@ export class CodexEngine implements IEngine {
     };
   }
 
-  private parseJsonLine(line: string): JsonRecord | undefined {
-    try {
-      const parsed = JSON.parse(line) as unknown;
-      return this.isJsonRecord(parsed) ? parsed : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
   private extractSessionId(event: JsonRecord): string | undefined {
     return (
       toStringValue(event.thread_id) ??
       toStringValue(event.session_id) ??
-      toStringValue(this.getNestedValue(event, ["thread", "id"]))
+      toStringValue(getNestedValue(event, ["thread", "id"]))
     );
   }
 
@@ -441,7 +432,7 @@ export class CodexEngine implements IEngine {
       return toStringValue(event.text) ?? this.extractContentText(event.content);
     }
 
-    const item = this.getJsonRecord(event.item);
+    const item = getJsonRecord(event.item);
     const itemType = toStringValue(item?.type);
 
     if (itemType !== "agent_message") {
@@ -460,8 +451,8 @@ export class CodexEngine implements IEngine {
     event: JsonRecord,
   ): { input: number; output: number; cachedInput: number } | undefined {
     const usageRecord =
-      this.getJsonRecord(event.usage) ??
-      this.getJsonRecord(this.getNestedValue(event, ["turn", "usage"]));
+      getJsonRecord(event.usage) ??
+      getJsonRecord(getNestedValue(event, ["turn", "usage"]));
 
     if (!usageRecord) {
       return undefined;
@@ -471,20 +462,20 @@ export class CodexEngine implements IEngine {
       toNumber(usageRecord.output_tokens) ||
       toNumber(usageRecord.completion_tokens) ||
       toNumber(
-        this.getNestedValue(usageRecord, ["output_tokens_details", "reasoning_tokens"]),
+        getNestedValue(usageRecord, ["output_tokens_details", "reasoning_tokens"]),
       ) ||
       toNumber(
-        this.getNestedValue(usageRecord, ["completion_tokens_details", "reasoning_tokens"]),
+        getNestedValue(usageRecord, ["completion_tokens_details", "reasoning_tokens"]),
       );
     const inputTokens =
       toNumber(usageRecord.input_tokens) || toNumber(usageRecord.prompt_tokens);
     const cachedInputTokens =
       toNumber(usageRecord.cached_input_tokens) ||
       toNumber(
-        this.getNestedValue(usageRecord, ["input_tokens_details", "cached_tokens"]),
+        getNestedValue(usageRecord, ["input_tokens_details", "cached_tokens"]),
       ) ||
       toNumber(
-        this.getNestedValue(usageRecord, ["prompt_tokens_details", "cached_tokens"]),
+        getNestedValue(usageRecord, ["prompt_tokens_details", "cached_tokens"]),
       );
 
     if (inputTokens === 0 && outputTokens === 0 && cachedInputTokens === 0) {
@@ -506,7 +497,7 @@ export class CodexEngine implements IEngine {
     if (type === "turn.failed") {
       return (
         toStringValue(event.message) ??
-        toStringValue(this.getNestedValue(event, ["error", "message"])) ??
+        toStringValue(getNestedValue(event, ["error", "message"])) ??
         "Codex turn failed."
       );
     }
@@ -514,7 +505,7 @@ export class CodexEngine implements IEngine {
     if (type === "error") {
       return (
         toStringValue(event.message) ??
-        toStringValue(this.getNestedValue(event, ["error", "message"])) ??
+        toStringValue(getNestedValue(event, ["error", "message"])) ??
         "Codex reported an error."
       );
     }
@@ -529,7 +520,7 @@ export class CodexEngine implements IEngine {
 
     const text = content
       .map((item) => {
-        if (!this.isJsonRecord(item)) {
+        if (!isJsonRecord(item)) {
           return "";
         }
 
@@ -541,55 +532,7 @@ export class CodexEngine implements IEngine {
     return text.trim() || undefined;
   }
 
-  private createSpawnError(error: unknown): EngineError {
-    if (this.isJsonRecord(error) && error.code === "ENOENT") {
-      return new EngineError(
-        "Codex CLI not found. Install `codex` and ensure it is available on PATH.",
-        'unavailable',
-      );
-    }
-
-    const message = error instanceof Error ? error.message : "Codex process failed to start.";
-    return new EngineError(message || "Codex process failed to start.", 'unknown', { cause: error });
-  }
-
-  private createProcessError(
-    stderr: string,
-    code: number | null,
-    signal: string | null,
-  ): EngineError {
-    const trimmed = stderr.trim();
-
-    if (/auth|login|api key|credential|unauthorized|forbidden/i.test(trimmed)) {
-      return new EngineError(
-        "Codex authentication appears to be unavailable or expired. Configure `apiKey`/`CODEX_API_KEY` or refresh the CLI login.",
-        'auth_expired',
-      );
-    }
-
-    const detail = trimmed || `exit code ${code ?? "unknown"} signal ${signal ?? "none"}`;
-    return new EngineError(`Codex command failed: ${detail}`, 'unknown');
-  }
-
-  private getNestedValue(record: JsonRecord, path: string[]): unknown {
-    let current: unknown = record;
-
-    for (const segment of path) {
-      if (!this.isJsonRecord(current)) {
-        return undefined;
-      }
-
-      current = current[segment];
-    }
-
-    return current;
-  }
-
-  private getJsonRecord(value: unknown): JsonRecord | undefined {
-    return this.isJsonRecord(value) ? value : undefined;
-  }
-
-  private hasSubscriptionAuth(output: string, code: number | null): boolean {
+  private detectSubscriptionAuth(output: string, code: number | null): boolean {
     if (code !== 0) {
       return false;
     }
@@ -626,20 +569,11 @@ export class CodexEngine implements IEngine {
         : undefined)
     );
   }
-
-  private chunkToString(chunk: unknown): string {
-    if (typeof chunk === "string") {
-      return chunk;
-    }
-
-    if (chunk instanceof Uint8Array) {
-      return new TextDecoder().decode(chunk);
-    }
-
-    return String(chunk);
-  }
-
-  private isJsonRecord(value: unknown): value is JsonRecord {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  }
 }
+
+const CODEX_PROCESS_ERROR_OPTIONS = {
+  engineLabel: "Codex",
+  authRegex: /auth|login|api key|credential|unauthorized|forbidden/i,
+  authMessage: "Codex authentication appears to be unavailable or expired. Configure `apiKey`/`CODEX_API_KEY` or refresh the CLI login.",
+  authCategory: "auth_expired" as const,
+};

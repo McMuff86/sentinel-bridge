@@ -26,7 +26,7 @@ export interface TaskRoutingResult {
   reasoning: string;
   alternatives: TaskRoutingAlternative[];
   costTier: CostTier;
-  method: 'thompson' | 'static';
+  method: 'adaptive' | 'static';
 }
 
 interface EngineStrength {
@@ -223,15 +223,16 @@ export function routeTask(
         estimatedCostTier: getEngineCostTier(e.strength.engine, e.strength.engine === 'claude'),
       }));
 
+      const strategy = adaptiveRouter.strategy;
       return {
         classification,
         recommendedEngine: adaptive.engine,
         recommendedModel: strength.defaultModel,
         confidence: 'high',
-        reasoning: `Thompson Sampling selected ${adaptive.engine} (confidence: ${(adaptive.confidence * 100).toFixed(1)}%)`,
+        reasoning: `Adaptive routing (${strategy}) selected ${adaptive.engine} (confidence: ${(adaptive.confidence * 100).toFixed(1)}%)`,
         alternatives,
         costTier: getEngineCostTier(adaptive.engine, adaptive.engine === 'claude'),
-        method: 'thompson',
+        method: 'adaptive',
       };
     }
   }

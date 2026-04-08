@@ -136,4 +136,62 @@ describe('McpServer', () => {
   it('should print readiness to stderr', () => {
     expect(stderrWrites.some(w => w.includes('Server ready'))).toBe(true);
   });
+
+  it('should return error for resources/list (not supported)', async () => {
+    const response = await sendAndWait({ jsonrpc: '2.0', id: 10, method: 'resources/list' });
+    expect(response.error).toBeDefined();
+  });
+
+  it('should handle tools/call with empty arguments', async () => {
+    const response = await sendAndWait({
+      jsonrpc: '2.0', id: 11, method: 'tools/call',
+      params: { name: 'echo', arguments: {} },
+    });
+    const result = response.result as { content: Array<{ type: string; text: string }> };
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe('text');
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.echoed).toBeUndefined();
+  });
+
+  it('should include jsonrpc version in all responses', async () => {
+    const response = await sendAndWait({ jsonrpc: '2.0', id: 12, method: 'ping' });
+    expect(response.jsonrpc).toBe('2.0');
+    expect(response.id).toBe(12);
+  });
+
+  it('should return matching id for error responses', async () => {
+    const response = await sendAndWait({ jsonrpc: '2.0', id: 99, method: 'no/such/method' });
+    expect(response.id).toBe(99);
+    expect(response.error).toBeDefined();
+  });
+
+  it('should handle tool that throws an error', async () => {
+    server.registerTool(
+      { name: 'failing', description: 'Always fails', inputSchema: { type: 'object', properties: {} } },
+      async () => { throw new Error('deliberate failure'); },
+    );
+
+    const response = await sendAndWait({
+      jsonrpc: '2.0', id: 13, method: 'tools/call',
+      params: { name: 'failing', arguments: {} },
+    });
+    const result = response.result as { content: Array<{ text: string }>; isError: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('deliberate failure');
+  });
+
+  it('should handle multiple sequential requests correctly', async () => {
+    const r1 = await sendAndWait({ jsonrpc: '2.0', id: 20, method: 'ping' });
+    expect(r1.id).toBe(20);
+    expect(r1.result).toEqual({});
+
+    const r2 = await sendAndWait({
+      jsonrpc: '2.0', id: 21, method: 'tools/call',
+      params: { name: 'echo', arguments: { text: 'seq-test' } },
+    });
+    expect(r2.id).toBe(21);
+    const parsed = JSON.parse((r2.result as any).content[0].text);
+    expect(parsed.echoed).toBe('seq-test');
+  });
 });
